@@ -10,7 +10,9 @@ package net.wurstclient.settings.filters;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.mob.WaterCreatureEntity;
 import net.minecraft.entity.passive.AxolotlEntity;
+import net.minecraft.entity.passive.GlowSquidEntity;
 import net.minecraft.entity.passive.PufferfishEntity;
+import net.minecraft.entity.passive.SquidEntity;
 
 public final class FilterPassiveWaterSetting extends EntityFilterCheckbox
 {
@@ -29,6 +31,9 @@ public final class FilterPassiveWaterSetting extends EntityFilterCheckbox
 		// never filter out pufferfish
 		if(e instanceof PufferfishEntity)
 			return true;
+			
+		else if (e instanceof SquidEntity || e instanceof GlowSquidEntity)
+			return false;
 		
 		return !(e instanceof WaterCreatureEntity
 			|| e instanceof AxolotlEntity);
