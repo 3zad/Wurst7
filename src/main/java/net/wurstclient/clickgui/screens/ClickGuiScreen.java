@@ -7,10 +7,11 @@
  */
 package net.wurstclient.clickgui.screens;
 
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.Drawable;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.text.Text;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Renderable;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.network.chat.Component;
 import net.wurstclient.clickgui.ClickGui;
 
 public final class ClickGuiScreen extends Screen
@@ -19,28 +20,28 @@ public final class ClickGuiScreen extends Screen
 	
 	public ClickGuiScreen(ClickGui gui)
 	{
-		super(Text.literal(""));
+		super(Component.literal(""));
 		this.gui = gui;
 	}
 	
 	@Override
-	public boolean shouldPause()
+	public boolean isPauseScreen()
 	{
 		return false;
 	}
 	
 	@Override
-	public boolean mouseClicked(double mouseX, double mouseY, int mouseButton)
+	public boolean mouseClicked(MouseButtonEvent context, boolean doubleClick)
 	{
-		gui.handleMouseClick((int)mouseX, (int)mouseY, mouseButton);
-		return super.mouseClicked(mouseX, mouseY, mouseButton);
+		gui.handleMouseClick(context);
+		return super.mouseClicked(context, doubleClick);
 	}
 	
 	@Override
-	public boolean mouseReleased(double mouseX, double mouseY, int mouseButton)
+	public boolean mouseReleased(MouseButtonEvent context)
 	{
-		gui.handleMouseRelease(mouseX, mouseY, mouseButton);
-		return super.mouseReleased(mouseX, mouseY, mouseButton);
+		gui.handleMouseRelease(context.x(), context.y(), context.button());
+		return super.mouseReleased(context);
 	}
 	
 	@Override
@@ -53,12 +54,19 @@ public final class ClickGuiScreen extends Screen
 	}
 	
 	@Override
-	public void render(DrawContext context, int mouseX, int mouseY,
+	public void render(GuiGraphics context, int mouseX, int mouseY,
 		float partialTicks)
 	{
-		for(Drawable drawable : drawables)
+		for(Renderable drawable : renderables)
 			drawable.render(context, mouseX, mouseY, partialTicks);
 		
 		gui.render(context, mouseX, mouseY, partialTicks);
+	}
+	
+	@Override
+	public void renderBackground(GuiGraphics context, int mouseX, int mouseY,
+		float deltaTicks)
+	{
+		// Don't blur
 	}
 }

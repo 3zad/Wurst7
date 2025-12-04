@@ -7,10 +7,16 @@
  */
 package net.wurstclient.clickgui;
 
-import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.wurstclient.WurstClient;
 
 public abstract class Component
 {
+	protected static final Minecraft MC = WurstClient.MC;
+	protected static final WurstClient WURST = WurstClient.INSTANCE;
+	
 	private int x;
 	private int y;
 	private int width;
@@ -18,12 +24,13 @@ public abstract class Component
 	
 	private Window parent;
 	
-	public void handleMouseClick(double mouseX, double mouseY, int mouseButton)
+	public void handleMouseClick(double mouseX, double mouseY, int mouseButton,
+		MouseButtonEvent context)
 	{
 		
 	}
 	
-	public abstract void render(DrawContext context, int mouseX, int mouseY,
+	public abstract void render(GuiGraphics context, int mouseX, int mouseY,
 		float partialTicks);
 	
 	public abstract int getDefaultWidth();
@@ -96,5 +103,20 @@ public abstract class Component
 	{
 		if(parent != null)
 			parent.invalidate();
+	}
+	
+	protected boolean isHovering(int mouseX, int mouseY)
+	{
+		int x1 = getX();
+		int x2 = x1 + getWidth();
+		int y1 = getY();
+		int y2 = y1 + getHeight();
+		
+		Window parent = getParent();
+		boolean scrollEnabled = parent.isScrollingEnabled();
+		int scroll = scrollEnabled ? parent.getScrollOffset() : 0;
+		
+		return mouseX >= x1 && mouseY >= y1 && mouseX < x2 && mouseY < y2
+			&& mouseY >= -scroll && mouseY < parent.getHeight() - 13 - scroll;
 	}
 }

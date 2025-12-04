@@ -7,21 +7,18 @@
  */
 package net.wurstclient.util;
 
-import org.lwjgl.opengl.GL11;
+import com.mojang.blaze3d.vertex.PoseStack;
 
-import com.mojang.blaze3d.systems.RenderSystem;
-
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gl.ShaderProgramKeys;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.MathHelper;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
+import net.minecraft.util.Mth;
+import net.minecraft.world.phys.AABB;
 import net.wurstclient.WurstClient;
 import net.wurstclient.mixinterface.IMinecraftClient;
 
 public final class OverlayRenderer
 {
-	protected static final MinecraftClient MC = WurstClient.MC;
+	protected static final Minecraft MC = WurstClient.MC;
 	protected static final IMinecraftClient IMC = WurstClient.IMC;
 	
 	private float progress;
@@ -38,69 +35,42 @@ public final class OverlayRenderer
 	public void updateProgress()
 	{
 		prevProgress = progress;
-		progress = MC.interactionManager.currentBreakingProgress;
+		progress = MC.gameMode.destroyProgress;
 		
 		if(progress < prevProgress)
 			prevProgress = progress;
 	}
 	
-	public void render(MatrixStack matrixStack, float partialTicks,
-		BlockPos pos)
+	public void render(PoseStack matrixStack, float partialTicks, BlockPos pos)
 	{
 		if(pos == null)
 			return;
 		
-		// reset progress if breaking a different block
+		// Reset progress if breaking a different block
 		if(prevPos != null && !pos.equals(prevPos))
 			resetProgress();
 		
 		prevPos = pos;
 		
-		// GL settings
-		GL11.glEnable(GL11.GL_BLEND);
-		GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
-		GL11.glEnable(GL11.GL_CULL_FACE);
-		GL11.glDisable(GL11.GL_DEPTH_TEST);
-		
-		matrixStack.push();
-		
-		RegionPos region = RenderUtils.getCameraRegion();
-		RenderUtils.applyRegionalRenderOffset(matrixStack, region);
-		
-		// set position
-		matrixStack.translate(pos.getX() - region.x(), pos.getY(),
-			pos.getZ() - region.z());
-		
-		// get interpolated progress
-		boolean breaksInstantly = MC.player.getAbilities().creativeMode
+		// Get interpolated progress
+		boolean breaksInstantly = MC.player.getAbilities().instabuild
 			|| BlockUtils.getHardness(pos) >= 1;
 		float p = breaksInstantly ? 1
-			: MathHelper.lerp(partialTicks, prevProgress, progress);
+			: Mth.lerp(partialTicks, prevProgress, progress);
 		
-		// set size
-		if(p < 1)
-		{
-			matrixStack.translate(0.5, 0.5, 0.5);
-			matrixStack.scale(p, p, p);
-			matrixStack.translate(-0.5, -0.5, -0.5);
-		}
-		
-		// get color
+		// Get colors
 		float red = p * 2F;
 		float green = 2 - red;
+		float[] rgb = {red, green, 0};
+		int quadColor = RenderUtils.toIntColor(rgb, 0.25F);
+		int lineColor = RenderUtils.toIntColor(rgb, 0.5F);
 		
-		// draw box
-		RenderSystem.setShader(ShaderProgramKeys.POSITION);
-		RenderSystem.setShaderColor(red, green, 0, 0.25F);
-		RenderUtils.drawSolidBox(matrixStack);
-		RenderSystem.setShaderColor(red, green, 0, 0.5F);
-		RenderUtils.drawOutlinedBox(matrixStack);
+		// Set size
+		AABB box = new AABB(pos);
+		if(p < 1)
+			box = box.deflate((1 - p) * 0.5);
 		
-		matrixStack.pop();
-		
-		// GL resets
-		RenderSystem.setShaderColor(1, 1, 1, 1);
-		GL11.glEnable(GL11.GL_DEPTH_TEST);
-		GL11.glDisable(GL11.GL_BLEND);
+		RenderUtils.drawSolidBox(matrixStack, box, quadColor, false);
+		RenderUtils.drawOutlinedBox(matrixStack, box, lineColor, false);
 	}
 }

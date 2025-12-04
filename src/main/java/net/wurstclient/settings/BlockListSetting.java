@@ -20,9 +20,8 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 
-import net.minecraft.block.Block;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Identifier;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.block.Block;
 import net.wurstclient.WurstClient;
 import net.wurstclient.clickgui.Component;
 import net.wurstclient.clickgui.components.BlockListEditButton;
@@ -41,8 +40,7 @@ public class BlockListSetting extends Setting
 	{
 		super(name, description);
 		
-		Arrays.stream(blocks).parallel()
-			.map(s -> Registries.BLOCK.get(Identifier.of(s)))
+		Arrays.stream(blocks).parallel().map(BlockUtils::getBlockFromNameOrID)
 			.filter(Objects::nonNull).map(BlockUtils::getName).distinct()
 			.sorted().forEachOrdered(s -> blockNames.add(s));
 		defaultNames = blockNames.toArray(new String[0]);
@@ -61,6 +59,9 @@ public class BlockListSetting extends Setting
 	
 	public int indexOf(String name)
 	{
+		if(name == null)
+			return -1;
+		
 		return Collections.binarySearch(blockNames, name);
 	}
 	
@@ -132,10 +133,27 @@ public class BlockListSetting extends Setting
 			}
 			
 			// otherwise, load the blocks in the JSON array
-			JsonUtils.getAsArray(json).getAllStrings().parallelStream()
-				.map(s -> Registries.BLOCK.get(Identifier.of(s)))
-				.filter(Objects::nonNull).map(BlockUtils::getName).distinct()
-				.sorted().forEachOrdered(s -> blockNames.add(s));
+			for(String rawName : JsonUtils.getAsArray(json).getAllStrings())
+			{
+				ResourceLocation id = ResourceLocation.tryParse(rawName);
+				if(id == null)
+				{
+					System.out.println("Discarding BlockList entry \"" + rawName
+						+ "\" as it is not a valid identifier");
+					continue;
+				}
+				
+				String name = id.toString();
+				if(blockNames.contains(name))
+				{
+					System.out.println("Discarding BlockList entry \"" + rawName
+						+ "\" as \"" + name + "\" is already in the list");
+					continue;
+				}
+				
+				blockNames.add(name);
+			}
+			blockNames.sort(null);
 			
 		}catch(JsonException e)
 		{

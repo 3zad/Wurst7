@@ -10,23 +10,20 @@ package net.wurstclient.hacks;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.stream.Stream;
 
-import org.lwjgl.opengl.GL11;
+import com.mojang.blaze3d.vertex.PoseStack;
 
-import com.mojang.blaze3d.systems.RenderSystem;
-
-import net.minecraft.block.Block;
-import net.minecraft.client.gl.ShaderProgramKeys;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 import net.wurstclient.Category;
 import net.wurstclient.events.LeftClickListener;
 import net.wurstclient.events.RenderListener;
@@ -43,13 +40,15 @@ import net.wurstclient.util.BlockBreaker.BlockBreakingParams;
 import net.wurstclient.util.BlockBreakingCache;
 import net.wurstclient.util.BlockUtils;
 import net.wurstclient.util.OverlayRenderer;
-import net.wurstclient.util.RegionPos;
 import net.wurstclient.util.RenderUtils;
 import net.wurstclient.util.RotationUtils;
 
 public final class VeinMinerHack extends Hack
 	implements UpdateListener, LeftClickListener, RenderListener
 {
+	private static final AABB BLOCK_BOX =
+		new AABB(1 / 16.0, 1 / 16.0, 1 / 16.0, 15 / 16.0, 15 / 16.0, 15 / 16.0);
+	
 	private final SliderSetting range =
 		new SliderSetting("Range", 5, 1, 6, 0.05, ValueDisplay.DECIMAL);
 	
@@ -113,8 +112,8 @@ public final class VeinMinerHack extends Hack
 		currentVein.clear();
 		if(currentBlock != null)
 		{
-			MC.interactionManager.breakingBlock = true;
-			MC.interactionManager.cancelBlockBreaking();
+			MC.gameMode.isDestroying = true;
+			MC.gameMode.stopDestroyBlock();
 			currentBlock = null;
 		}
 		
@@ -126,13 +125,13 @@ public final class VeinMinerHack extends Hack
 	public void onUpdate()
 	{
 		currentBlock = null;
-		currentVein.removeIf(pos -> BlockUtils.getState(pos).isReplaceable());
+		currentVein.removeIf(pos -> BlockUtils.getState(pos).canBeReplaced());
 		
-		if(MC.options.attackKey.isPressed())
+		if(MC.options.keyAttack.isDown())
 			return;
 		
-		Vec3d eyesVec = RotationUtils.getEyesPos();
-		BlockPos eyesBlock = BlockPos.ofFloored(eyesVec);
+		Vec3 eyesVec = RotationUtils.getEyesPos();
+		BlockPos eyesBlock = BlockPos.containing(eyesVec);
 		double rangeSq = range.getValueSq();
 		int blockRange = range.getValueCeil();
 		
@@ -148,9 +147,9 @@ public final class VeinMinerHack extends Hack
 		stream = stream.sorted(BlockBreaker.comparingParams());
 		
 		// Break all blocks in creative mode
-		if(MC.player.getAbilities().creativeMode)
+		if(MC.player.getAbilities().instabuild)
 		{
-			MC.interactionManager.cancelBlockBreaking();
+			MC.gameMode.stopDestroyBlock();
 			overlay.resetProgress();
 			
 			ArrayList<BlockPos> blocks = cache
@@ -160,7 +159,7 @@ public final class VeinMinerHack extends Hack
 			
 			currentBlock = blocks.get(0);
 			BlockBreaker.breakBlocksWithPacketSpam(blocks);
-			swingHand.swing(Hand.MAIN_HAND);
+			swingHand.swing(InteractionHand.MAIN_HAND);
 			return;
 		}
 		
@@ -170,7 +169,7 @@ public final class VeinMinerHack extends Hack
 		
 		if(currentBlock == null)
 		{
-			MC.interactionManager.cancelBlockBreaking();
+			MC.gameMode.stopDestroyBlock();
 			overlay.resetProgress();
 			return;
 		}
@@ -190,11 +189,10 @@ public final class VeinMinerHack extends Hack
 	{
 		WURST.getRotationFaker().faceVectorPacket(params.hitVec());
 		
-		if(!MC.interactionManager.updateBlockBreakingProgress(params.pos(),
-			params.side()))
+		if(!MC.gameMode.continueDestroyBlock(params.pos(), params.side()))
 			return false;
 		
-		swingHand.swing(Hand.MAIN_HAND);
+		swingHand.swing(InteractionHand.MAIN_HAND);
 		return true;
 	}
 	
@@ -204,7 +202,7 @@ public final class VeinMinerHack extends Hack
 		if(!currentVein.isEmpty())
 			return;
 		
-		if(!(MC.crosshairTarget instanceof BlockHitResult bHitResult)
+		if(!(MC.hitResult instanceof BlockHitResult bHitResult)
 			|| bHitResult.getType() != HitResult.Type.BLOCK)
 			return;
 		
@@ -229,7 +227,7 @@ public final class VeinMinerHack extends Hack
 			
 			for(Direction direction : Direction.values())
 			{
-				BlockPos neighbor = current.offset(direction);
+				BlockPos neighbor = current.relative(direction);
 				if(!currentVein.contains(neighbor)
 					&& BlockUtils.getBlock(neighbor) == targetBlock)
 				{
@@ -241,38 +239,14 @@ public final class VeinMinerHack extends Hack
 	}
 	
 	@Override
-	public void onRender(MatrixStack matrixStack, float partialTicks)
+	public void onRender(PoseStack matrixStack, float partialTicks)
 	{
 		overlay.render(matrixStack, partialTicks, currentBlock);
 		if(currentVein.isEmpty())
 			return;
 		
-		// GL settings
-		GL11.glEnable(GL11.GL_BLEND);
-		GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
-		GL11.glDisable(GL11.GL_CULL_FACE);
-		GL11.glDisable(GL11.GL_DEPTH_TEST);
-		
-		matrixStack.push();
-		RegionPos region = RenderUtils.getCameraRegion();
-		RenderUtils.applyRegionalRenderOffset(matrixStack, region);
-		
-		double boxMin = 1 / 16.0;
-		double boxMax = 15 / 16.0;
-		Box box = new Box(boxMin, boxMin, boxMin, boxMax, boxMax, boxMax)
-			.offset(region.negate().toVec3d());
-		
-		RenderSystem.setShader(ShaderProgramKeys.POSITION);
-		RenderSystem.setShaderColor(0, 0, 0, 0.5F);
-		for(BlockPos pos : currentVein)
-			RenderUtils.drawOutlinedBox(box.offset(pos), matrixStack);
-		
-		matrixStack.pop();
-		
-		// GL resets
-		RenderSystem.setShaderColor(1, 1, 1, 1);
-		GL11.glEnable(GL11.GL_DEPTH_TEST);
-		GL11.glEnable(GL11.GL_CULL_FACE);
-		GL11.glDisable(GL11.GL_BLEND);
+		List<AABB> boxes =
+			currentVein.stream().map(pos -> BLOCK_BOX.move(pos)).toList();
+		RenderUtils.drawOutlinedBoxes(matrixStack, boxes, 0x80000000, false);
 	}
 }

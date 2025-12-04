@@ -15,14 +15,12 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.PoseStack;
 
-import net.minecraft.client.gl.ShaderProgramKeys;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.util.Hand;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.phys.Vec3;
 import net.wurstclient.Category;
 import net.wurstclient.SearchTags;
 import net.wurstclient.WurstClient;
@@ -36,7 +34,8 @@ import net.wurstclient.hack.DontSaveState;
 import net.wurstclient.hack.Hack;
 import net.wurstclient.hacks.treebot.Tree;
 import net.wurstclient.hacks.treebot.TreeBotUtils;
-import net.wurstclient.settings.FacingSetting;
+import net.wurstclient.settings.FaceTargetSetting;
+import net.wurstclient.settings.FaceTargetSetting.FaceTarget;
 import net.wurstclient.settings.SliderSetting;
 import net.wurstclient.settings.SliderSetting.ValueDisplay;
 import net.wurstclient.settings.SwingHandSetting;
@@ -55,16 +54,8 @@ public final class TreeBotHack extends Hack
 		"How far TreeBot will reach to break blocks.", 4.5, 1, 6, 0.05,
 		ValueDisplay.DECIMAL);
 	
-	private final FacingSetting facing = FacingSetting.withoutPacketSpam(
-		"How TreeBot should face the logs and leaves when breaking them.\n\n"
-			+ "\u00a7lOff\u00a7r - Don't face the blocks at all. Will be"
-			+ " detected by anti-cheat plugins.\n\n"
-			+ "\u00a7lServer-side\u00a7r - Face the blocks on the"
-			+ " server-side, while still letting you move the camera freely on"
-			+ " the client-side.\n\n"
-			+ "\u00a7lClient-side\u00a7r - Face the blocks by moving your"
-			+ " camera on the client-side. This is the most legit option, but"
-			+ " can be disorienting to look at.");
+	private final FaceTargetSetting faceTarget =
+		FaceTargetSetting.withoutPacketSpam(this, FaceTarget.SERVER);
 	
 	private final SwingHandSetting swingHand =
 		new SwingHandSetting(this, SwingHand.SERVER);
@@ -82,7 +73,7 @@ public final class TreeBotHack extends Hack
 		super("TreeBot");
 		setCategory(Category.BLOCKS);
 		addSetting(range);
-		addSetting(facing);
+		addSetting(faceTarget);
 		addSetting(swingHand);
 	}
 	
@@ -120,17 +111,12 @@ public final class TreeBotHack extends Hack
 		treeFinder = null;
 		angleFinder = null;
 		processor = null;
-		
-		if(tree != null)
-		{
-			tree.close();
-			tree = null;
-		}
+		tree = null;
 		
 		if(currentBlock != null)
 		{
-			MC.interactionManager.breakingBlock = true;
-			MC.interactionManager.cancelBlockBreaking();
+			MC.gameMode.isDestroying = true;
+			MC.gameMode.stopDestroyBlock();
 			currentBlock = null;
 		}
 		
@@ -153,11 +139,9 @@ public final class TreeBotHack extends Hack
 		}
 		
 		tree.getLogs().removeIf(Predicate.not(TreeBotUtils::isLog));
-		tree.compileBuffer();
 		
 		if(tree.getLogs().isEmpty())
 		{
-			tree.close();
 			tree = null;
 			return;
 		}
@@ -240,12 +224,11 @@ public final class TreeBotHack extends Hack
 		WURST.getHax().autoToolHack.equipBestTool(pos, false, true, 0);
 		
 		// face block
-		facing.getSelected().face(params.hitVec());
+		faceTarget.face(params.hitVec());
 		
 		// damage block and swing hand
-		if(MC.interactionManager.updateBlockBreakingProgress(pos,
-			params.side()))
-			swingHand.swing(Hand.MAIN_HAND);
+		if(MC.gameMode.continueDestroyBlock(pos, params.side()))
+			swingHand.swing(InteractionHand.MAIN_HAND);
 		
 		// update progress
 		overlay.updateProgress();
@@ -254,9 +237,8 @@ public final class TreeBotHack extends Hack
 	}
 	
 	@Override
-	public void onRender(MatrixStack matrixStack, float partialTicks)
+	public void onRender(PoseStack matrixStack, float partialTicks)
 	{
-		RenderSystem.setShader(ShaderProgramKeys.POSITION);
 		PathCmd pathCmd = WURST.getCmds().pathCmd;
 		
 		if(treeFinder != null)
@@ -276,7 +258,7 @@ public final class TreeBotHack extends Hack
 	private ArrayList<BlockPos> getNeighbors(BlockPos pos)
 	{
 		return BlockUtils
-			.getAllInBoxStream(pos.add(-1, -1, -1), pos.add(1, 1, 1))
+			.getAllInBoxStream(pos.offset(-1, -1, -1), pos.offset(1, 1, 1))
 			.filter(TreeBotUtils::isLog)
 			.collect(Collectors.toCollection(ArrayList::new));
 	}
@@ -344,7 +326,7 @@ public final class TreeBotHack extends Hack
 			List<PathPos> path = pathFinder.getPath();
 			path = path.subList(processor.getIndex(), path.size());
 			
-			return path.stream().flatMap(pos -> Stream.of(pos, pos.up()))
+			return path.stream().flatMap(pos -> Stream.of(pos, pos.above()))
 				.distinct().filter(TreeBotUtils::isLeaves)
 				.collect(Collectors.toCollection(ArrayList::new));
 		}
@@ -359,7 +341,7 @@ public final class TreeBotHack extends Hack
 	{
 		public TreeFinder()
 		{
-			super(BlockPos.ofFloored(WurstClient.MC.player.getPos()));
+			super(BlockPos.containing(WurstClient.MC.player.position()));
 		}
 		
 		public TreeFinder(TreeBotPathFinder pathFinder)
@@ -390,7 +372,7 @@ public final class TreeBotHack extends Hack
 			if(!TreeBotUtils.isLog(pos))
 				return false;
 			
-			if(TreeBotUtils.isLog(pos.down()))
+			if(TreeBotUtils.isLog(pos.below()))
 				return false;
 			
 			analyzeTree(pos);
@@ -438,7 +420,7 @@ public final class TreeBotHack extends Hack
 	{
 		public AngleFinder()
 		{
-			super(BlockPos.ofFloored(WurstClient.MC.player.getPos()));
+			super(BlockPos.containing(WurstClient.MC.player.position()));
 			setThinkSpeed(512);
 			setThinkTime(1);
 		}
@@ -463,8 +445,8 @@ public final class TreeBotHack extends Hack
 		private boolean hasAngle(PathPos pos)
 		{
 			double rangeSq = range.getValueSq();
-			ClientPlayerEntity player = WurstClient.MC.player;
-			Vec3d eyes = Vec3d.ofBottomCenter(pos).add(0,
+			LocalPlayer player = WurstClient.MC.player;
+			Vec3 eyes = Vec3.atBottomCenterOf(pos).add(0,
 				player.getEyeHeight(player.getPose()), 0);
 			
 			for(BlockPos log : tree.getLogs())

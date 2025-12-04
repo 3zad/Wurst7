@@ -10,28 +10,21 @@ package net.wurstclient.hacks;
 import java.awt.Color;
 import java.util.Map.Entry;
 
-import org.joml.Matrix4f;
-import org.lwjgl.opengl.GL11;
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.blaze3d.vertex.VertexFormat.Mode;
 
-import com.mojang.blaze3d.systems.RenderSystem;
-
-import net.minecraft.block.BlockState;
-import net.minecraft.client.gl.ShaderProgram;
-import net.minecraft.client.gl.ShaderProgramKeys;
-import net.minecraft.client.gl.VertexBuffer;
-import net.minecraft.client.render.BufferBuilder;
-import net.minecraft.client.render.BuiltBuffer;
-import net.minecraft.client.render.Tessellator;
-import net.minecraft.client.render.VertexFormat;
-import net.minecraft.client.render.VertexFormats;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.SpawnRestriction;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.world.LightType;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.SpawnPlacements;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.level.block.state.BlockState;
 import net.wurstclient.Category;
 import net.wurstclient.SearchTags;
+import net.wurstclient.WurstRenderLayers;
 import net.wurstclient.events.PacketInputListener;
 import net.wurstclient.events.RenderListener;
 import net.wurstclient.events.UpdateListener;
@@ -43,6 +36,7 @@ import net.wurstclient.settings.ChunkAreaSetting.ChunkArea;
 import net.wurstclient.settings.ColorSetting;
 import net.wurstclient.settings.SliderSetting;
 import net.wurstclient.settings.SliderSetting.ValueDisplay;
+import net.wurstclient.util.EasyVertexBuffer;
 import net.wurstclient.util.RegionPos;
 import net.wurstclient.util.RenderUtils;
 import net.wurstclient.util.chunk.ChunkSearcher;
@@ -72,7 +66,8 @@ public final class MobSpawnEspHack extends Hack
 	private final HitboxCheckSetting hitboxCheck = new HitboxCheckSetting();
 	
 	private final ChunkVertexBufferCoordinator coordinator =
-		new ChunkVertexBufferCoordinator(this::isSpawnable, this::buildBuffer,
+		new ChunkVertexBufferCoordinator(this::isSpawnable, Mode.LINES,
+			DefaultVertexFormat.POSITION_COLOR_NORMAL, this::buildBuffer,
 			drawDistance);
 	
 	private int cachedDayColor;
@@ -126,49 +121,30 @@ public final class MobSpawnEspHack extends Hack
 	}
 	
 	@Override
-	public void onRender(MatrixStack matrixStack, float partialTicks)
+	public void onRender(PoseStack matrixStack, float partialTicks)
 	{
-		// GL settings
-		GL11.glEnable(GL11.GL_BLEND);
-		GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
+		RenderType.CompositeRenderType layer =
+			WurstRenderLayers.getLines(depthTest.isChecked());
 		
-		boolean depthTest = this.depthTest.isChecked();
-		if(!depthTest)
-			GL11.glDisable(GL11.GL_DEPTH_TEST);
-		
-		RenderSystem.setShader(ShaderProgramKeys.POSITION_COLOR);
-		RenderSystem.setShaderColor(1, 1, 1, opacity.getValueF());
-		
-		for(Entry<ChunkPos, VertexBuffer> entry : coordinator.getBuffers())
+		for(Entry<ChunkPos, EasyVertexBuffer> entry : coordinator.getBuffers())
 		{
 			RegionPos region = RegionPos.of(entry.getKey());
-			VertexBuffer vertexBuffer = entry.getValue();
 			
-			matrixStack.push();
+			matrixStack.pushPose();
 			RenderUtils.applyRegionalRenderOffset(matrixStack, region);
 			
-			Matrix4f viewMatrix = matrixStack.peek().getPositionMatrix();
-			Matrix4f projMatrix = RenderSystem.getProjectionMatrix();
-			ShaderProgram shader = RenderSystem.getShader();
-			vertexBuffer.bind();
-			vertexBuffer.draw(viewMatrix, projMatrix, shader);
-			VertexBuffer.unbind();
+			entry.getValue().draw(matrixStack, layer, 1, 1, 1,
+				opacity.getValueF());
 			
-			matrixStack.pop();
+			matrixStack.popPose();
 		}
-		
-		// GL resets
-		RenderSystem.setShaderColor(1, 1, 1, 1);
-		if(!depthTest)
-			GL11.glEnable(GL11.GL_DEPTH_TEST);
-		GL11.glDisable(GL11.GL_BLEND);
 	}
 	
 	private boolean isSpawnable(BlockPos pos, BlockState state)
 	{
 		// Check for solid blocks, fluids, redstone, prevent_spawning tags, etc.
 		// See SpawnLocationTypes.ON_GROUND
-		if(!SpawnRestriction.isSpawnPosAllowed(EntityType.CREEPER, MC.world,
+		if(!SpawnPlacements.isSpawnPositionOk(EntityType.CREEPER, MC.level,
 			pos))
 			return false;
 		
@@ -177,29 +153,24 @@ public final class MobSpawnEspHack extends Hack
 			return false;
 		
 		// Check block light level
-		return MC.world.getLightLevel(LightType.BLOCK, pos) < 1;
+		return MC.level.getBrightness(LightLayer.BLOCK, pos) < 1;
 	}
 	
-	private BuiltBuffer buildBuffer(ChunkSearcher searcher,
+	private void buildBuffer(VertexConsumer buffer, ChunkSearcher searcher,
 		Iterable<Result> results)
 	{
 		RegionPos region = RegionPos.of(searcher.getPos());
-		Tessellator tessellator = Tessellator.getInstance();
-		BufferBuilder bufferBuilder = tessellator.begin(
-			VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
 		
 		for(Result result : results)
 		{
 			if(searcher.isInterrupted())
-				return null;
+				return;
 			
-			drawCross(bufferBuilder, result.pos(), region);
+			drawCross(buffer, result.pos(), region);
 		}
-		
-		return bufferBuilder.endNullable();
 	}
 	
-	private void drawCross(BufferBuilder bufferBuilder, BlockPos pos,
+	private void drawCross(VertexConsumer buffer, BlockPos pos,
 		RegionPos region)
 	{
 		float x1 = pos.getX() - region.x();
@@ -208,12 +179,12 @@ public final class MobSpawnEspHack extends Hack
 		float z1 = pos.getZ() - region.z();
 		float z2 = z1 + 1;
 		
-		int color = MC.world.getLightLevel(LightType.SKY, pos) < 8
+		int color = MC.level.getBrightness(LightLayer.SKY, pos) < 8
 			? cachedDayColor : cachedNightColor;
 		
-		bufferBuilder.vertex(x1, y, z1).color(color);
-		bufferBuilder.vertex(x2, y, z2).color(color);
-		bufferBuilder.vertex(x2, y, z1).color(color);
-		bufferBuilder.vertex(x1, y, z2).color(color);
+		buffer.addVertex(x1, y, z1).setColor(color).setNormal(1, 0, 1);
+		buffer.addVertex(x2, y, z2).setColor(color).setNormal(1, 0, 1);
+		buffer.addVertex(x2, y, z1).setColor(color).setNormal(-1, 0, 1);
+		buffer.addVertex(x1, y, z2).setColor(color).setNormal(-1, 0, 1);
 	}
 }

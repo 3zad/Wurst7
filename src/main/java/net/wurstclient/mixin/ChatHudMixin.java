@@ -20,31 +20,33 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import com.llamalad7.mixinextras.sugar.Local;
 import com.llamalad7.mixinextras.sugar.ref.LocalRef;
 
-import net.minecraft.client.gui.hud.ChatHud;
-import net.minecraft.client.gui.hud.ChatHudLine;
-import net.minecraft.client.gui.hud.MessageIndicator;
-import net.minecraft.network.message.MessageSignatureData;
-import net.minecraft.text.Text;
+import net.minecraft.client.GuiMessage;
+import net.minecraft.client.GuiMessageTag;
+import net.minecraft.client.gui.components.ChatComponent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MessageSignature;
 import net.wurstclient.WurstClient;
 import net.wurstclient.event.EventManager;
 import net.wurstclient.events.ChatInputListener.ChatInputEvent;
 
-@Mixin(ChatHud.class)
+@Mixin(ChatComponent.class)
 public class ChatHudMixin
 {
 	@Shadow
 	@Final
-	private List<ChatHudLine.Visible> visibleMessages;
+	private List<GuiMessage.Line> trimmedMessages;
 	
 	@Inject(at = @At("HEAD"),
-		method = "addMessage(Lnet/minecraft/text/Text;Lnet/minecraft/network/message/MessageSignatureData;Lnet/minecraft/client/gui/hud/MessageIndicator;)V",
+		method = "addMessage(Lnet/minecraft/network/chat/Component;Lnet/minecraft/network/chat/MessageSignature;Lnet/minecraft/client/GuiMessageTag;)V",
 		cancellable = true)
-	private void onAddMessage(Text message,
-		@Nullable MessageSignatureData signature,
-		@Nullable MessageIndicator indicatorDontUse, CallbackInfo ci,
-		@Local LocalRef<MessageIndicator> indicator)
+	private void onAddMessage(Component messageDontUse,
+		@Nullable MessageSignature signature,
+		@Nullable GuiMessageTag indicatorDontUse, CallbackInfo ci,
+		@Local(argsOnly = true) LocalRef<Component> message,
+		@Local(argsOnly = true) LocalRef<GuiMessageTag> indicator)
 	{
-		ChatInputEvent event = new ChatInputEvent(message, visibleMessages);
+		ChatInputEvent event =
+			new ChatInputEvent(message.get(), trimmedMessages);
 		
 		EventManager.fire(event);
 		if(event.isCancelled())
@@ -53,8 +55,8 @@ public class ChatHudMixin
 			return;
 		}
 		
-		message = event.getComponent();
+		message.set(event.getComponent());
 		indicator.set(WurstClient.INSTANCE.getOtfs().noChatReportsOtf
-			.modifyIndicator(message, signature, indicator.get()));
+			.modifyIndicator(message.get(), signature, indicator.get()));
 	}
 }

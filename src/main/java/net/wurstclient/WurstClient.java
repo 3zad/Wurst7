@@ -14,10 +14,10 @@ import java.util.ArrayList;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.Minecraft;
 import net.wurstclient.altmanager.AltManager;
 import net.wurstclient.altmanager.Encryption;
-import net.wurstclient.analytics.WurstAnalytics;
+import net.wurstclient.analytics.PlausibleAnalytics;
 import net.wurstclient.clickgui.ClickGui;
 import net.wurstclient.command.CmdList;
 import net.wurstclient.command.CmdProcessor;
@@ -47,13 +47,13 @@ public enum WurstClient
 {
 	INSTANCE;
 	
-	public static MinecraftClient MC;
+	public static Minecraft MC;
 	public static IMinecraftClient IMC;
 	
-	public static final String VERSION = "7.46.6";
-	public static final String MC_VERSION = "1.21.4";
+	public static final String VERSION = "7.51.2";
+	public static final String MC_VERSION = "1.21.10";
 	
-	private WurstAnalytics analytics;
+	private PlausibleAnalytics plausible;
 	private EventManager eventManager;
 	private AltManager altManager;
 	private HackList hax;
@@ -80,14 +80,13 @@ public enum WurstClient
 	{
 		System.out.println("Starting Wurst Client...");
 		
-		MC = MinecraftClient.getInstance();
+		MC = Minecraft.getInstance();
 		IMC = (IMinecraftClient)MC;
 		wurstFolder = createWurstFolder();
 		
-		String trackingID = "UA-52838431-5";
-		String hostname = "client.wurstclient.net";
 		Path analyticsFile = wurstFolder.resolve("analytics.json");
-		analytics = new WurstAnalytics(trackingID, hostname, analyticsFile);
+		plausible = new PlausibleAnalytics(analyticsFile);
+		plausible.pageview("/");
 		
 		eventManager = new EventManager(this);
 		
@@ -142,14 +141,11 @@ public enum WurstClient
 		Path altsFile = wurstFolder.resolve("alts.encrypted_json");
 		Path encFolder = Encryption.chooseEncryptionFolder();
 		altManager = new AltManager(altsFile, encFolder);
-		
-		analytics.trackPageView("/mc" + MC_VERSION + "/v" + VERSION,
-			"Wurst " + VERSION + " MC" + MC_VERSION);
 	}
 	
 	private Path createWurstFolder()
 	{
-		Path dotMinecraftFolder = MC.runDirectory.toPath().normalize();
+		Path dotMinecraftFolder = MC.gameDirectory.toPath().normalize();
 		Path wurstFolder = dotMinecraftFolder.resolve("wurst");
 		
 		try
@@ -170,9 +166,9 @@ public enum WurstClient
 		return translator.translate(key, args);
 	}
 	
-	public WurstAnalytics getAnalytics()
+	public PlausibleAnalytics getPlausible()
 	{
-		return analytics;
+		return plausible;
 	}
 	
 	public EventManager getEventManager()

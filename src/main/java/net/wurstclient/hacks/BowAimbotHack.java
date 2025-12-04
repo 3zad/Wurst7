@@ -13,29 +13,18 @@ import java.util.function.ToDoubleFunction;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
-import org.joml.Matrix4f;
-import org.lwjgl.opengl.GL11;
+import com.mojang.blaze3d.vertex.PoseStack;
 
-import com.mojang.blaze3d.systems.RenderSystem;
-
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gl.ShaderProgramKeys;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.client.render.BufferBuilder;
-import net.minecraft.client.render.BufferRenderer;
-import net.minecraft.client.render.Tessellator;
-import net.minecraft.client.render.VertexFormat;
-import net.minecraft.client.render.VertexFormats;
-import net.minecraft.client.util.Window;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.item.BowItem;
-import net.minecraft.item.CrossbowItem;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.math.Box;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.item.BowItem;
+import net.minecraft.world.item.CrossbowItem;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.AABB;
 import net.wurstclient.Category;
 import net.wurstclient.SearchTags;
 import net.wurstclient.events.GUIRenderListener;
@@ -48,7 +37,6 @@ import net.wurstclient.settings.SliderSetting;
 import net.wurstclient.settings.SliderSetting.ValueDisplay;
 import net.wurstclient.settings.filterlists.EntityFilterList;
 import net.wurstclient.util.EntityUtils;
-import net.wurstclient.util.RegionPos;
 import net.wurstclient.util.RenderUtils;
 import net.wurstclient.util.RotationUtils;
 
@@ -74,9 +62,6 @@ public final class BowAimbotHack extends Hack
 	
 	private final ColorSetting color = new ColorSetting("ESP color",
 		"Color of the box that BowAimbot draws around the target.", Color.RED);
-	
-	private static final Box TARGET_BOX =
-		new Box(-0.5, -0.5, -0.5, 0.5, 0.5, 0.5);
 	
 	private Entity target;
 	private float velocity;
@@ -118,10 +103,10 @@ public final class BowAimbotHack extends Hack
 	@Override
 	public void onUpdate()
 	{
-		ClientPlayerEntity player = MC.player;
+		LocalPlayer player = MC.player;
 		
 		// check if item is ranged weapon
-		ItemStack stack = MC.player.getInventory().getMainHandStack();
+		ItemStack stack = MC.player.getInventory().getSelectedItem();
 		Item item = stack.getItem();
 		if(!(item instanceof BowItem || item instanceof CrossbowItem))
 		{
@@ -130,7 +115,7 @@ public final class BowAimbotHack extends Hack
 		}
 		
 		// check if using bow
-		if(item instanceof BowItem && !MC.options.useKey.isPressed()
+		if(item instanceof BowItem && !MC.options.keyUse.isDown()
 			&& !player.isUsingItem())
 		{
 			target = null;
@@ -147,13 +132,13 @@ public final class BowAimbotHack extends Hack
 		// set target
 		if(filterEntities(Stream.of(target)) == null)
 			target = filterEntities(StreamSupport
-				.stream(MC.world.getEntities().spliterator(), true));
+				.stream(MC.level.entitiesForRendering().spliterator(), true));
 		
 		if(target == null)
 			return;
 		
 		// set velocity
-		velocity = (72000 - player.getItemUseTimeLeft()) / 20F;
+		velocity = (72000 - player.getUseItemRemainingTicks()) / 20F;
 		velocity = (velocity * velocity + velocity * 2) / 3;
 		if(velocity > 1)
 			velocity = 1;
@@ -161,18 +146,18 @@ public final class BowAimbotHack extends Hack
 		// set position to aim at
 		double d = RotationUtils.getEyesPos().distanceTo(
 			target.getBoundingBox().getCenter()) * predictMovement.getValue();
-		double posX = target.getX() + (target.getX() - target.lastRenderX) * d
-			- player.getX();
-		double posY = target.getY() + (target.getY() - target.lastRenderY) * d
-			+ target.getHeight() * 0.5 - player.getY()
+		double posX =
+			target.getX() + (target.getX() - target.xOld) * d - player.getX();
+		double posY = target.getY() + (target.getY() - target.yOld) * d
+			+ target.getBbHeight() * 0.5 - player.getY()
 			- player.getEyeHeight(player.getPose());
-		double posZ = target.getZ() + (target.getZ() - target.lastRenderZ) * d
-			- player.getZ();
+		double posZ =
+			target.getZ() + (target.getZ() - target.zOld) * d - player.getZ();
 		
 		// set yaw
 		float neededYaw = (float)Math.toDegrees(Math.atan2(posZ, posX)) - 90;
-		MC.player.setYaw(
-			RotationUtils.limitAngleChange(MC.player.getYaw(), neededYaw));
+		MC.player.setYRot(
+			RotationUtils.limitAngleChange(MC.player.getYRot(), neededYaw));
 		
 		// calculate needed pitch
 		double hDistance = Math.sqrt(posX * posX + posZ * posZ);
@@ -189,7 +174,7 @@ public final class BowAimbotHack extends Hack
 			WURST.getRotationFaker()
 				.faceVectorClient(target.getBoundingBox().getCenter());
 		else
-			MC.player.setPitch(neededPitch);
+			MC.player.setXRot(neededPitch);
 	}
 	
 	private Entity filterEntities(Stream<Entity> s)
@@ -201,70 +186,26 @@ public final class BowAimbotHack extends Hack
 	}
 	
 	@Override
-	public void onRender(MatrixStack matrixStack, float partialTicks)
+	public void onRender(PoseStack matrixStack, float partialTicks)
 	{
 		if(target == null)
 			return;
 		
-		// GL settings
-		GL11.glEnable(GL11.GL_BLEND);
-		GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
-		GL11.glDisable(GL11.GL_DEPTH_TEST);
+		AABB box = EntityUtils.getLerpedBox(target, partialTicks)
+			.move(0, 0.05, 0).inflate(0.05);
 		
-		matrixStack.push();
+		int quadColor = color.getColorI(0.5F * velocity);
+		RenderUtils.drawSolidBox(matrixStack, box, quadColor, false);
 		
-		RegionPos region = RenderUtils.getCameraRegion();
-		RenderUtils.applyRegionalRenderOffset(matrixStack, region);
-		
-		// set position
-		matrixStack.translate(target.getX() - region.x(), target.getY(),
-			target.getZ() - region.z());
-		
-		// set size
-		float boxWidth = target.getWidth() + 0.1F;
-		float boxHeight = target.getHeight() + 0.1F;
-		matrixStack.scale(boxWidth, boxHeight, boxWidth);
-		
-		// move to center
-		matrixStack.translate(0, 0.5, 0);
-		
-		float v = 1 / velocity;
-		matrixStack.scale(v, v, v);
-		
-		RenderSystem.setShader(ShaderProgramKeys.POSITION);
-		
-		// draw outline
-		color.setAsShaderColor(0.5F * velocity);
-		RenderUtils.drawOutlinedBox(TARGET_BOX, matrixStack);
-		
-		// draw box
-		color.setAsShaderColor(0.25F * velocity);
-		RenderUtils.drawSolidBox(TARGET_BOX, matrixStack);
-		
-		matrixStack.pop();
-		
-		// GL resets
-		GL11.glEnable(GL11.GL_DEPTH_TEST);
-		GL11.glDisable(GL11.GL_BLEND);
-		RenderSystem.setShaderColor(1, 1, 1, 1);
+		int lineColor = color.getColorI(0.25F * velocity);
+		RenderUtils.drawOutlinedBox(matrixStack, box, lineColor, false);
 	}
 	
 	@Override
-	public void onRenderGUI(DrawContext context, float partialTicks)
+	public void onRenderGUI(GuiGraphics context, float partialTicks)
 	{
-		MatrixStack matrixStack = context.getMatrices();
 		if(target == null)
 			return;
-		
-		// GL settings
-		GL11.glEnable(GL11.GL_BLEND);
-		GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
-		GL11.glDisable(GL11.GL_CULL_FACE);
-		
-		matrixStack.push();
-		
-		Matrix4f matrix = matrixStack.peek().getPositionMatrix();
-		Tessellator tessellator = RenderSystem.renderThreadTesselator();
 		
 		String message;
 		if(velocity < 1)
@@ -272,40 +213,25 @@ public final class BowAimbotHack extends Hack
 		else
 			message = "Target Locked";
 		
-		TextRenderer tr = MC.textRenderer;
+		Font tr = MC.font;
+		int msgWidth = tr.width(message);
 		
-		// translate to center
-		Window sr = MC.getWindow();
-		int msgWidth = tr.getWidth(message);
-		matrixStack.translate(sr.getScaledWidth() / 2 - msgWidth / 2,
-			sr.getScaledHeight() / 2 + 1, 0);
+		int msgX1 = context.guiWidth() / 2 - msgWidth / 2;
+		int msgX2 = msgX1 + msgWidth + 3;
+		int msgY1 = context.guiHeight() / 2 + 1;
+		int msgY2 = msgY1 + 10;
 		
 		// background
-		RenderSystem.setShader(ShaderProgramKeys.POSITION);
-		RenderSystem.setShaderColor(0, 0, 0, 0.5F);
-		BufferBuilder bufferBuilder = tessellator
-			.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION);
-		bufferBuilder.vertex(matrix, 0, 0, 0);
-		bufferBuilder.vertex(matrix, msgWidth + 3, 0, 0);
-		bufferBuilder.vertex(matrix, msgWidth + 3, 10, 0);
-		bufferBuilder.vertex(matrix, 0, 10, 0);
-		BufferRenderer.drawWithGlobalProgram(bufferBuilder.end());
+		context.fill(msgX1, msgY1, msgX2, msgY2, 0x80000000);
 		
 		// text
-		RenderSystem.setShaderColor(1, 1, 1, 1);
-		context.drawText(MC.textRenderer, message, 2, 1, 0xffffffff, false);
-		
-		matrixStack.pop();
-		
-		// GL resets
-		GL11.glEnable(GL11.GL_CULL_FACE);
-		GL11.glDisable(GL11.GL_BLEND);
-		RenderSystem.setShaderColor(1, 1, 1, 1);
+		context.drawString(tr, message, msgX1 + 2, msgY1 + 1, 0xFFFFFFFF,
+			false);
 	}
 	
 	private enum Priority
 	{
-		DISTANCE("Distance", e -> MC.player.squaredDistanceTo(e)),
+		DISTANCE("Distance", e -> MC.player.distanceToSqr(e)),
 		
 		ANGLE("Angle",
 			e -> RotationUtils
@@ -315,7 +241,7 @@ public final class BowAimbotHack extends Hack
 			e -> Math
 				.pow(RotationUtils
 					.getAngleToLookVec(e.getBoundingBox().getCenter()), 2)
-				+ MC.player.squaredDistanceTo(e)),
+				+ MC.player.distanceToSqr(e)),
 		
 		HEALTH("Health", e -> e instanceof LivingEntity
 			? ((LivingEntity)e).getHealth() : Integer.MAX_VALUE);

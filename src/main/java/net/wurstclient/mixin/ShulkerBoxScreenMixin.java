@@ -8,36 +8,33 @@
 package net.wurstclient.mixin;
 
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 
-import net.minecraft.client.gui.screen.ingame.HandledScreen;
-import net.minecraft.client.gui.screen.ingame.ShulkerBoxScreen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.screen.ShulkerBoxScreenHandler;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.text.Text;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.client.gui.screens.inventory.ShulkerBoxScreen;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.inventory.ShulkerBoxMenu;
 import net.wurstclient.WurstClient;
 import net.wurstclient.hacks.AutoStealHack;
 
 @Mixin(ShulkerBoxScreen.class)
 public abstract class ShulkerBoxScreenMixin
-	extends HandledScreen<ShulkerBoxScreenHandler>
+	extends AbstractContainerScreen<ShulkerBoxMenu>
 {
-	private final int rows = 3;
-	
+	@Unique
 	private final AutoStealHack autoSteal =
 		WurstClient.INSTANCE.getHax().autoStealHack;
-	private int mode;
 	
-	private ShulkerBoxScreenMixin(WurstClient wurst,
-		ShulkerBoxScreenHandler handler, PlayerInventory inventory, Text title)
+	private ShulkerBoxScreenMixin(WurstClient wurst, ShulkerBoxMenu handler,
+		Inventory inventory, Component title)
 	{
 		super(handler, inventory, title);
 	}
 	
 	@Override
-	protected void init()
+	public void init()
 	{
 		super.init();
 		
@@ -46,70 +43,19 @@ public abstract class ShulkerBoxScreenMixin
 		
 		if(autoSteal.areButtonsVisible())
 		{
-			addDrawableChild(ButtonWidget
-				.builder(Text.literal("Steal"), b -> steal())
-				.dimensions(x + backgroundWidth - 108, y + 4, 50, 12).build());
+			addRenderableWidget(Button
+				.builder(Component.literal("Steal"),
+					b -> autoSteal.steal(this, 3))
+				.bounds(leftPos + imageWidth - 108, topPos + 4, 50, 12)
+				.build());
 			
-			addDrawableChild(ButtonWidget
-				.builder(Text.literal("Store"), b -> store())
-				.dimensions(x + backgroundWidth - 56, y + 4, 50, 12).build());
+			addRenderableWidget(Button
+				.builder(Component.literal("Store"),
+					b -> autoSteal.store(this, 3))
+				.bounds(leftPos + imageWidth - 56, topPos + 4, 50, 12).build());
 		}
 		
 		if(autoSteal.isEnabled())
-			steal();
-	}
-	
-	private void steal()
-	{
-		runInThread(() -> shiftClickSlots(0, rows * 9, 1));
-	}
-	
-	private void store()
-	{
-		runInThread(() -> shiftClickSlots(rows * 9, rows * 9 + 44, 2));
-	}
-	
-	private void runInThread(Runnable r)
-	{
-		new Thread(() -> {
-			try
-			{
-				r.run();
-				
-			}catch(Exception e)
-			{
-				e.printStackTrace();
-			}
-		}).start();
-	}
-	
-	private void shiftClickSlots(int from, int to, int mode)
-	{
-		this.mode = mode;
-		
-		for(int i = from; i < to; i++)
-		{
-			Slot slot = handler.slots.get(i);
-			if(slot.getStack().isEmpty())
-				continue;
-			
-			waitForDelay();
-			if(this.mode != mode || client.currentScreen == null)
-				break;
-			
-			onMouseClick(slot, slot.id, 0, SlotActionType.QUICK_MOVE);
-		}
-	}
-	
-	private void waitForDelay()
-	{
-		try
-		{
-			Thread.sleep(autoSteal.getDelay());
-			
-		}catch(InterruptedException e)
-		{
-			throw new RuntimeException(e);
-		}
+			autoSteal.steal(this, 3);
 	}
 }

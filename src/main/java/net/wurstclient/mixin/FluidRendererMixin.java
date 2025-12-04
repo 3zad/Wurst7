@@ -8,33 +8,68 @@
 package net.wurstclient.mixin;
 
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import org.spongepowered.asm.mixin.injection.Constant;
+import org.spongepowered.asm.mixin.injection.ModifyConstant;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.client.render.block.FluidRenderer;
-import net.minecraft.util.math.Direction;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.mojang.blaze3d.vertex.VertexConsumer;
+
+import net.minecraft.client.renderer.block.LiquidBlockRenderer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.BlockAndTintGetter;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.FluidState;
+import net.wurstclient.WurstClient;
 import net.wurstclient.event.EventManager;
 import net.wurstclient.events.ShouldDrawSideListener.ShouldDrawSideEvent;
+import net.wurstclient.hacks.XRayHack;
 
-@Mixin(FluidRenderer.class)
+@Mixin(LiquidBlockRenderer.class)
 public class FluidRendererMixin
 {
+	@Unique
+	private static final ThreadLocal<Float> currentOpacity =
+		ThreadLocal.withInitial(() -> 1F);
+	
 	/**
-	 * This mixin hides and shows fluids when using X-Ray without Sodium
-	 * installed.
+	 * Hides and shows fluids when using X-Ray without Sodium installed.
 	 */
-	@Inject(at = @At("HEAD"),
-		method = "isSideCovered(Lnet/minecraft/util/math/Direction;FLnet/minecraft/block/BlockState;)Z",
-		cancellable = true)
-	private static void onIsSideCovered(Direction direction, float f,
-		BlockState state, CallbackInfoReturnable<Boolean> cir)
+	@WrapOperation(at = @At(value = "INVOKE",
+		target = "Lnet/minecraft/client/renderer/block/LiquidBlockRenderer;isFaceOccludedByNeighbor(Lnet/minecraft/core/Direction;FLnet/minecraft/world/level/block/state/BlockState;)Z"),
+		method = "tesselate(Lnet/minecraft/world/level/BlockAndTintGetter;Lnet/minecraft/core/BlockPos;Lcom/mojang/blaze3d/vertex/VertexConsumer;Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/material/FluidState;)V")
+	private boolean modifyShouldSkipRendering(Direction side, float height,
+		BlockState neighborState, Operation<Boolean> original,
+		BlockAndTintGetter world, BlockPos pos, VertexConsumer vertexConsumer,
+		BlockState blockState, FluidState fluidState)
 	{
-		ShouldDrawSideEvent event = new ShouldDrawSideEvent(state, null);
+		// Note: the null BlockPos is here to skip the "exposed only" check
+		ShouldDrawSideEvent event = new ShouldDrawSideEvent(blockState, null);
 		EventManager.fire(event);
 		
+		XRayHack xray = WurstClient.INSTANCE.getHax().xRayHack;
+		if(!xray.isOpacityMode() || xray.isVisible(blockState.getBlock(), pos))
+			currentOpacity.set(1F);
+		else
+			currentOpacity.set(xray.getOpacityFloat());
+		
 		if(event.isRendered() != null)
-			cir.setReturnValue(!event.isRendered());
+			return !event.isRendered();
+		
+		return original.call(side, height, neighborState);
+	}
+	
+	/**
+	 * Modifies opacity of fluids when using X-Ray without Sodium installed.
+	 */
+	@ModifyConstant(
+		method = "vertex(Lcom/mojang/blaze3d/vertex/VertexConsumer;FFFFFFFFI)V",
+		constant = @Constant(floatValue = 1F, ordinal = 0))
+	private float modifyOpacity(float original)
+	{
+		return currentOpacity.get();
 	}
 }

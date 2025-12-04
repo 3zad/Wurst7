@@ -1,12 +1,12 @@
 buildscript {
 	dependencies {
-		classpath "org.kohsuke:github-api:1.326"
+		classpath "org.kohsuke:github-api:1.330"
 	}
 }
 
 plugins {
-	id "fabric-loom" version "1.9-SNAPSHOT"
-	id "com.diffplug.spotless" version "7.0.2"
+	id "fabric-loom" version "${loom_version}"
+	id "com.diffplug.spotless" version "8.1.0"
 }
 
 def ENV = System.getenv()
@@ -24,12 +24,23 @@ repositories {
 	// Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
 	// See https://docs.gradle.org/current/userguide/declaring_repositories.html
 	// for more information about repositories.
+	exclusiveContent {
+		forRepository {
+			maven {
+				name = "Modrinth"
+				url = "https://api.modrinth.com/maven"
+			}
+		}
+		filter {
+			includeGroup "maven.modrinth"
+		}
+	}
 }
 
 dependencies {
 	// To change the versions see the gradle.properties file
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
-	mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+	mappings loom.officialMojangMappings()
 	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	testImplementation "net.fabricmc:fabric-loader-junit:${project.loader_version}"
 	
@@ -45,60 +56,79 @@ dependencies {
 	modImplementation "com.google.code.findbugs:jsr305:3.0.2"
 }
 
+fabricApi.configureTests {
+	createSourceSet = true
+	enableGameTests = false
+	enableClientGameTests = true
+	modId = "wurst_testmod"
+	username = "Wurst-Bot"
+}
+
 loom {
 	accessWidenerPath = file("src/main/resources/wurst.accesswidener")
+	
+	runs {
+		clientWithMods {
+			inherit client
+		}
+
+		clientGameTestWithMods {
+			inherit client
+			source = sourceSets.gametest
+			runDir = "build/run/clientGameTestWithMods"
+			vmArgs.add("-Dfabric.client.gametest")
+			vmArgs.add("-Dwurst.test.withMods=true")
+			programArgs.add("--username=Wurst-Bot")
+		}
+	}
 }
 
 configurations {
-	productionRuntime {
-		extendsFrom configurations.minecraftLibraries
-		extendsFrom configurations.loaderLibraries
-		extendsFrom configurations.minecraftRuntimeLibraries
+	testMods {
+		transitive = false
 	}
 }
 
 dependencies {
-	productionRuntime "net.fabricmc:fabric-loader:${project.loader_version}"
-	productionRuntime "net.fabricmc:intermediary:${project.minecraft_version}"
+	testMods "maven.modrinth:sodium:${project.sodium_version}"
 }
 
-import net.fabricmc.loom.util.Platform
-tasks.register('runEndToEndTest', JavaExec) {
-	dependsOn remapJar, downloadAssets
-	classpath.from configurations.productionRuntime
-	mainClass = "net.fabricmc.loader.impl.launch.knot.KnotClient"
-	workingDir = file("run")
-	
-	doFirst {
-		classpath.from loom.minecraftProvider.minecraftClientJar
-		workingDir.mkdirs()
-		
-		args(
-			"--assetIndex", loom.minecraftProvider.versionInfo.assetIndex().fabricId(loom.minecraftProvider.minecraftVersion()),
-			"--assetsDir", new File(loom.files.userCache, "assets").absolutePath,
-			"--gameDir", workingDir.absolutePath
-		)
-		
-		if (Platform.CURRENT.operatingSystem.isMacOS()) {
-			jvmArgs("-XstartOnFirstThread")
-		}
-		
-		jvmArgs(
-			"-Dfabric.addMods=${configurations.modImplementation.find { it.name.contains('fabric-api') }.absolutePath}${File.pathSeparator}${remapJar.archiveFile.get().asFile.absolutePath}",
-			"-Dwurst.e2eTest",
-			"-Dfabric-tag-conventions-v2.missingTagTranslationWarning=fail",
-			"-Dfabric-tag-conventions-v1.legacyTagWarning=fail",
-			"-Dmixin.debug.verify=true",
-			"-Dmixin.debug.countInjections=true"
-		)
-	}
+def cleanClientWithMods = tasks.register("cleanClientWithMods", Delete) {
+	delete "run/mods"
+}
+
+def prepareClientWithMods = tasks.register("prepareClientWithMods", Sync) {
+	from configurations.testMods
+	into "run/mods"
+}
+
+tasks.named("runClientWithMods") {
+	dependsOn prepareClientWithMods
+	finalizedBy cleanClientWithMods
+}
+
+def cleanClientGameTestWithMods = tasks.register("cleanClientGameTestWithMods", Delete) {
+	delete layout.buildDirectory.dir("run/clientGameTestWithMods")
+}
+
+def prepareClientGameTestWithMods = tasks.register("prepareClientGameTestWithMods", Sync) {
+	dependsOn cleanClientGameTestWithMods
+	from configurations.testMods
+	into layout.buildDirectory.dir("run/clientGameTestWithMods/mods")
+}
+
+def doModCompatTest = providers.gradleProperty("do_mod_compat_test").map { it.toBoolean() }.orElse(false)
+tasks.named("runClientGameTestWithMods") {
+	onlyIf { doModCompatTest.get() }
+	dependsOn prepareClientGameTestWithMods
 }
 
 processResources {
-	inputs.property "version", project.version
+	def modVersion = project.version.substring(1)
+	inputs.property("version", modVersion)
 	
 	filesMatching("fabric.mod.json") {
-		expand "version": project.version
+		expand(version: modVersion)
 	}
 }
 
@@ -118,8 +148,11 @@ java {
 }
 
 jar {
-	from("LICENSE") {
-		rename {"${it}_${base.archivesName.get()}"}
+	def archivesName = project.base.archivesName
+	inputs.property("archivesName", archivesName)
+	
+	from("LICENSE.txt") {
+		rename { "LICENSE-${archivesName.get()}.txt" }
 	}
 	
 	exclude("intentionally_untranslated.json")
@@ -127,7 +160,7 @@ jar {
 
 import com.diffplug.spotless.generic.LicenseHeaderStep
 spotless {
-	lineEndings("WINDOWS")
+	lineEndings = "WINDOWS"
 	java {
 		removeUnusedImports()
 		leadingSpacesToTabs()
@@ -135,14 +168,13 @@ spotless {
 		eclipse().configFile(file("codestyle/formatter.xml"))
 	}
 	format("licenseHeader") {
-		target("src/*/java/**/*.java", "src/test/java/**/*.java")
-		targetExclude("src/main/java/net/wurstclient/analytics/dmurph/**/*.java")
+		target("src/*/java/**/*.java")
 		def header_file = file("codestyle/license_header.txt")
 		def delimiter = LicenseHeaderStep.DEFAULT_JAVA_HEADER_DELIMITER
 		licenseHeaderFile(header_file, delimiter).updateYearWithLatest(true)
 	}
 	json {
-		target "src/**/*.json"
+		target("src/**/*.json", "src/**/*.mcmeta")
 		gson().indentWithSpaces(2).version("2.11.0")
 	}
 }
@@ -155,9 +187,27 @@ def getGhVersion() {
 	return version.substring(0, version.indexOf("-MC"))
 }
 
-def getChangelogUrl() {
-	def versionSlug = version.substring(1, version.indexOf("-MC")).replace(".", "-")
-	return "https://www.wurstclient.net/updates/wurst-${versionSlug}/"
+def getChangelogLink(String platform, String from) {
+	def versionSlug = getGhVersion().substring(1).replace(".", "-")
+	def shortURL = "https://www.wurstclient.net/updates/wurst-${versionSlug}/"
+	def query = []
+	if (platform != "GitHub")
+		query.add("mc=${project.minecraft_version}")
+	query.add("utm_source=${platform}")
+	query.add("utm_medium=" + project.archives_base_name.replace("-", "+"))
+	def fullURL = shortURL + (query.isEmpty() ? "" : "?" + query.join("&"))
+	def encodedURL = java.net.URLEncoder.encode(fullURL, "UTF-8")
+	return "[${shortURL}](https://go.wimods.net/from/${from}?to=${encodedURL})"
+}
+
+def getChangelogImage(String from) {
+	return "![](https://img.wimods.net/${from})"
+}
+
+def getChangelog(String platform, String from) {
+	def prefix = platform == "GitHub" ? "" : "A changelog can be found at: "
+	def imgQuery = platform == "GitHub" ? "" : "?mc_version=${project.minecraft_version}&mod_loader=${project.mod_loader}"
+	return prefix + getChangelogLink(platform, from) + getChangelogImage(from + imgQuery)
 }
 
 import org.kohsuke.github.GHReleaseBuilder
@@ -170,12 +220,14 @@ task github(dependsOn: build) {
 	
 	doLast {
 		def github = GitHub.connectUsingOAuth(ENV.GITHUB_TOKEN as String)
-		def repository = github.getRepository("Wurst-Imperium/Wurst-MCX2")
+		def repoId = project.mcx_repo_id
+		def repository = github.getRepository(repoId)
 		def ghVersion = getGhVersion()
 		
 		def ghRelease = repository.getReleaseByTagName(ghVersion as String)
 		if(ghRelease == null) {
 			def releaseBuilder = new GHReleaseBuilder(repository, ghVersion as String)
+			releaseBuilder.body(getChangelogImage("github.com/${repoId}/releases/tag/${ghVersion}"))
 			releaseBuilder.prerelease(ghVersion.contains("pre"))
 			ghRelease = releaseBuilder.create()
 		}
@@ -185,10 +237,8 @@ task github(dependsOn: build) {
 	}
 }
 
-import java.time.LocalDate
 import org.kohsuke.github.GHIssueState
 import org.kohsuke.github.GHMilestoneState
-import java.time.ZoneId
 import java.time.Instant
 
 task closeMilestone {
@@ -198,7 +248,8 @@ task closeMilestone {
 	
 	doLast {
 		def github = GitHub.connectUsingOAuth(ENV.GITHUB_TOKEN as String)
-		def repository = github.getRepository("Wurst-Imperium/Wurst7")
+		def repoId = project.gh_repo_id
+		def repository = github.getRepository(repoId)
 		def ghVersion = getGhVersion()
 		
 		// Weird API design: listMilestones() requires GHIssueState while everything else uses GHMilestoneState.
@@ -209,46 +260,8 @@ task closeMilestone {
 		
 		if (milestone.getState() != GHMilestoneState.CLOSED) {
 			milestone.setDueOn(Date.from(Instant.now()))
-			milestone.setDescription(getChangelogUrl())
+			milestone.setDescription(getChangelog("GitHub", "github.com/${repoId}/milestone/${ghVersion}"))
 			milestone.close()
 		}
-	}
-}
-
-task uploadBackups {
-	dependsOn build
-	
-	onlyIf {
-		ENV.WI_BACKUPS_API_KEY
-	}
-	
-	doLast {
-		def shortVersion = getGhVersion().substring(1)
-		def backupUrl = "https://api.wurstclient.net/artifact-backups/Wurst/${shortVersion}"
-		
-		def connection = new URL(backupUrl).openConnection() as HttpURLConnection
-		def boundary = UUID.randomUUID().toString()
-		connection.setRequestMethod("POST")
-		connection.setRequestProperty("X-API-Key", ENV.WI_BACKUPS_API_KEY)
-		connection.setRequestProperty("Accept", "application/json")
-		connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
-		connection.doOutput = true
-		
-		def output = connection.outputStream
-		[remapJar, remapSourcesJar].each { jarTask ->
-			def file = jarTask.archiveFile.get().asFile
-			output << "--${boundary}\r\n"
-			output << "Content-Disposition: form-data; name=\"files\"; filename=\"${file.name}\"\r\n"
-			output << "Content-Type: application/java-archive\r\n\r\n"
-			file.withInputStream { input -> 
-				output << input
-			}
-			output << "\r\n"
-		}
-		output << "--${boundary}--\r\n"
-		output.flush()
-		
-		if(connection.responseCode != 200)
-			throw new GradleException("Failed to upload backups: ${connection.responseCode} ${connection.responseMessage}")
 	}
 }

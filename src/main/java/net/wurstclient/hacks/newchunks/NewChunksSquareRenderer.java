@@ -7,56 +7,49 @@
  */
 package net.wurstclient.hacks.newchunks;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Set;
 
-import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.VertexConsumer;
 
-import net.minecraft.client.render.BufferBuilder;
-import net.minecraft.client.render.BuiltBuffer;
-import net.minecraft.client.render.Tessellator;
-import net.minecraft.client.render.VertexFormat;
-import net.minecraft.client.render.VertexFormats;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkPos;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.ChunkPos;
+import net.wurstclient.WurstRenderLayers;
 import net.wurstclient.util.RegionPos;
 import net.wurstclient.util.RenderUtils;
 
 public final class NewChunksSquareRenderer implements NewChunksChunkRenderer
 {
 	@Override
-	public BuiltBuffer buildBuffer(Set<ChunkPos> chunks, int drawDistance)
-	{
-		Tessellator tessellator = RenderSystem.renderThreadTesselator();
-		BufferBuilder bufferBuilder = tessellator
-			.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION);
-		renderChunks(new ArrayList<>(chunks), drawDistance, bufferBuilder);
-		return bufferBuilder.endNullable();
-	}
-	
-	private void renderChunks(List<ChunkPos> chunks, int drawDistance,
-		BufferBuilder bufferBuilder)
+	public void buildBuffer(VertexConsumer buffer, Set<ChunkPos> chunks,
+		int drawDistance)
 	{
 		ChunkPos camChunkPos = new ChunkPos(RenderUtils.getCameraBlockPos());
 		RegionPos region = RegionPos.of(camChunkPos);
 		
 		for(ChunkPos chunkPos : chunks)
 		{
-			if(chunkPos.getChebyshevDistance(camChunkPos) > drawDistance)
+			if(chunkPos.getChessboardDistance(camChunkPos) > drawDistance)
 				continue;
 			
 			BlockPos blockPos =
-				chunkPos.getBlockPos(-region.x(), 0, -region.z());
+				chunkPos.getBlockAt(-region.x(), 0, -region.z());
 			float x1 = blockPos.getX() + 0.5F;
 			float x2 = x1 + 15;
 			float z1 = blockPos.getZ() + 0.5F;
 			float z2 = z1 + 15;
+			int color = 0xFFFFFFFF;
 			
-			bufferBuilder.vertex(x1, 0, z1);
-			bufferBuilder.vertex(x2, 0, z1);
-			bufferBuilder.vertex(x2, 0, z2);
-			bufferBuilder.vertex(x1, 0, z2);
+			buffer.addVertex(x1, 0, z1).setColor(color);
+			buffer.addVertex(x2, 0, z1).setColor(color);
+			buffer.addVertex(x2, 0, z2).setColor(color);
+			buffer.addVertex(x1, 0, z2).setColor(color);
 		}
+	}
+	
+	@Override
+	public RenderType.CompositeRenderType getLayer()
+	{
+		return WurstRenderLayers.ESP_QUADS_NO_CULLING;
 	}
 }

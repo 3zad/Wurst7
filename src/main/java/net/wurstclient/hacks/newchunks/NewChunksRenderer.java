@@ -7,24 +7,20 @@
  */
 package net.wurstclient.hacks.newchunks;
 
-import org.joml.Matrix4f;
-import org.lwjgl.opengl.GL11;
+import java.util.function.Consumer;
 
-import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
 
-import net.minecraft.client.gl.GlUsage;
-import net.minecraft.client.gl.ShaderProgram;
-import net.minecraft.client.gl.ShaderProgramKeys;
-import net.minecraft.client.gl.VertexBuffer;
-import net.minecraft.client.render.BuiltBuffer;
-import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.client.renderer.RenderType;
 import net.wurstclient.settings.ColorSetting;
 import net.wurstclient.settings.SliderSetting;
+import net.wurstclient.util.BufferWithLayer;
 import net.wurstclient.util.RenderUtils;
 
 public final class NewChunksRenderer
 {
-	private final VertexBuffer[] vertexBuffers = new VertexBuffer[4];
+	private final BufferWithLayer[] vertexBuffers = new BufferWithLayer[4];
 	
 	private final SliderSetting altitude;
 	private final SliderSetting opacity;
@@ -40,18 +36,10 @@ public final class NewChunksRenderer
 		this.oldChunksColor = oldChunksColor;
 	}
 	
-	public void updateBuffer(int i, BuiltBuffer buffer)
+	public void updateBuffer(int i, RenderType.CompositeRenderType layer,
+		Consumer<VertexConsumer> callback)
 	{
-		if(buffer == null)
-		{
-			vertexBuffers[i] = null;
-			return;
-		}
-		
-		vertexBuffers[i] = new VertexBuffer(GlUsage.STATIC_WRITE);
-		vertexBuffers[i].bind();
-		vertexBuffers[i].upload(buffer);
-		VertexBuffer.unbind();
+		vertexBuffers[i] = BufferWithLayer.createAndUpload(layer, callback);
 	}
 	
 	public void closeBuffers()
@@ -66,53 +54,32 @@ public final class NewChunksRenderer
 		}
 	}
 	
-	public void render(MatrixStack matrixStack, float partialTicks)
+	public void render(PoseStack matrixStack, float partialTicks)
 	{
-		// GL settings
-		GL11.glEnable(GL11.GL_BLEND);
-		GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
-		GL11.glDisable(GL11.GL_CULL_FACE);
-		GL11.glDisable(GL11.GL_DEPTH_TEST);
-		
-		matrixStack.push();
+		matrixStack.pushPose();
 		RenderUtils.applyRegionalRenderOffset(matrixStack);
-		
-		RenderSystem.setShader(ShaderProgramKeys.POSITION);
-		
-		Matrix4f projMatrix = RenderSystem.getProjectionMatrix();
-		ShaderProgram shader = RenderSystem.getShader();
 		
 		float alpha = opacity.getValueF();
 		double altitudeD = altitude.getValue();
 		
 		for(int i = 0; i < vertexBuffers.length; i++)
 		{
-			VertexBuffer buffer = vertexBuffers[i];
+			BufferWithLayer buffer = vertexBuffers[i];
 			if(buffer == null)
 				continue;
 			
-			matrixStack.push();
+			matrixStack.pushPose();
 			if(i == 0 || i == 2)
 				matrixStack.translate(0, altitudeD, 0);
 			
-			if(i < 2)
-				newChunksColor.setAsShaderColor(alpha);
-			else
-				oldChunksColor.setAsShaderColor(alpha);
+			float[] rgb =
+				i < 2 ? newChunksColor.getColorF() : oldChunksColor.getColorF();
 			
-			Matrix4f viewMatrix = matrixStack.peek().getPositionMatrix();
-			buffer.bind();
-			buffer.draw(viewMatrix, projMatrix, shader);
-			VertexBuffer.unbind();
+			buffer.draw(matrixStack, rgb, alpha);
 			
-			matrixStack.pop();
+			matrixStack.popPose();
 		}
 		
-		matrixStack.pop();
-		
-		// GL resets
-		RenderSystem.setShaderColor(1, 1, 1, 1);
-		GL11.glEnable(GL11.GL_DEPTH_TEST);
-		GL11.glDisable(GL11.GL_BLEND);
+		matrixStack.popPose();
 	}
 }

@@ -7,14 +7,9 @@
  */
 package net.wurstclient.commands;
 
-import org.lwjgl.opengl.GL11;
-
-import com.mojang.blaze3d.systems.RenderSystem;
-
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.render.RenderLayer;
-import net.minecraft.client.util.Window;
-import net.minecraft.util.Identifier;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.resources.ResourceLocation;
 import net.wurstclient.Category;
 import net.wurstclient.command.CmdException;
 import net.wurstclient.command.CmdSyntaxError;
@@ -26,11 +21,11 @@ import net.wurstclient.util.RenderUtils;
 public final class TacoCmd extends Command
 	implements GUIRenderListener, UpdateListener
 {
-	private final Identifier[] tacos =
-		{Identifier.of("wurst", "dancingtaco1.png"),
-			Identifier.of("wurst", "dancingtaco2.png"),
-			Identifier.of("wurst", "dancingtaco3.png"),
-			Identifier.of("wurst", "dancingtaco4.png")};
+	private final ResourceLocation[] tacos =
+		{ResourceLocation.fromNamespaceAndPath("wurst", "dancingtaco1.png"),
+			ResourceLocation.fromNamespaceAndPath("wurst", "dancingtaco2.png"),
+			ResourceLocation.fromNamespaceAndPath("wurst", "dancingtaco3.png"),
+			ResourceLocation.fromNamespaceAndPath("wurst", "dancingtaco4.png")};
 	
 	private boolean enabled;
 	private int ticks = 0;
@@ -84,26 +79,17 @@ public final class TacoCmd extends Command
 	}
 	
 	@Override
-	public void onRenderGUI(DrawContext context, float partialTicks)
+	public void onRenderGUI(GuiGraphics context, float partialTicks)
 	{
-		GL11.glEnable(GL11.GL_BLEND);
-		GL11.glDisable(GL11.GL_CULL_FACE);
-		GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
+		int color = WURST.getHax().rainbowUiHack.isEnabled()
+			? RenderUtils.toIntColor(WURST.getGui().getAcColor(), 1)
+			: 0xFFFFFFFF;
 		
-		if(WURST.getHax().rainbowUiHack.isEnabled())
-			RenderUtils.setShaderColor(WURST.getGui().getAcColor(), 1);
-		else
-			RenderSystem.setShaderColor(1, 1, 1, 1);
-		
-		Window sr = MC.getWindow();
-		int x = sr.getScaledWidth() / 2 - 32 + 76;
-		int y = sr.getScaledHeight() - 32 - 19;
+		int x = context.guiWidth() / 2 - 32 + 76;
+		int y = context.guiHeight() - 32 - 19;
 		int w = 64;
 		int h = 32;
-		context.drawTexture(RenderLayer::getGuiTextured, tacos[ticks / 8], x, y,
-			0, 0, w, h, w, h);
-		
-		GL11.glEnable(GL11.GL_CULL_FACE);
-		GL11.glDisable(GL11.GL_BLEND);
+		context.blit(RenderPipelines.GUI_TEXTURED, tacos[ticks / 8], x, y, 0, 0,
+			w, h, w, h, color);
 	}
 }

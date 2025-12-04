@@ -11,20 +11,14 @@ import java.util.Comparator;
 import java.util.function.ToDoubleFunction;
 import java.util.stream.Stream;
 
-import org.lwjgl.opengl.GL11;
+import com.mojang.blaze3d.vertex.PoseStack;
 
-import com.mojang.blaze3d.systems.RenderSystem;
-
-import net.minecraft.client.gl.ShaderProgramKeys;
-import net.minecraft.client.gui.screen.ingame.HandledScreen;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.util.Hand;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.util.Mth;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.phys.AABB;
 import net.wurstclient.Category;
 import net.wurstclient.events.HandleInputListener;
 import net.wurstclient.events.MouseUpdateListener;
@@ -42,7 +36,6 @@ import net.wurstclient.settings.filterlists.EntityFilterList;
 import net.wurstclient.settings.filters.*;
 import net.wurstclient.util.BlockUtils;
 import net.wurstclient.util.EntityUtils;
-import net.wurstclient.util.RegionPos;
 import net.wurstclient.util.RenderUtils;
 import net.wurstclient.util.Rotation;
 import net.wurstclient.util.RotationUtils;
@@ -179,12 +172,12 @@ public final class KillauraLegitHack extends Hack implements UpdateListener,
 		target = null;
 		
 		// don't attack when a container/inventory screen is open
-		if(MC.currentScreen instanceof HandledScreen)
+		if(MC.screen instanceof AbstractContainerScreen)
 			return;
 		
 		Stream<Entity> stream = EntityUtils.getAttackableEntities();
 		double rangeSq = range.getValueSq();
-		stream = stream.filter(e -> MC.player.squaredDistanceTo(e) <= rangeSq);
+		stream = stream.filter(e -> MC.player.distanceToSqr(e) <= rangeSq);
 		
 		if(fov.getValue() < 360.0)
 			stream = stream.filter(e -> RotationUtils.getAngleToLookVec(
@@ -223,15 +216,15 @@ public final class KillauraLegitHack extends Hack implements UpdateListener,
 			return;
 		
 		// attack entity
-		MC.interactionManager.attackEntity(MC.player, target);
-		swingHand.swing(Hand.MAIN_HAND);
+		MC.gameMode.attack(MC.player, target);
+		swingHand.swing(InteractionHand.MAIN_HAND);
 		speed.resetTimer(speedRandMS.getValue());
 	}
 	
 	private boolean faceEntityClient(Entity entity)
 	{
 		// get needed rotation
-		Box box = entity.getBoundingBox();
+		AABB box = entity.getBoundingBox();
 		Rotation needed = RotationUtils.getNeededRotations(box.getCenter());
 		
 		// turn towards center of boundingBox
@@ -254,9 +247,9 @@ public final class KillauraLegitHack extends Hack implements UpdateListener,
 		if(target == null || MC.player == null)
 			return;
 		
-		int diffYaw = (int)(nextYaw - MC.player.getYaw());
-		int diffPitch = (int)(nextPitch - MC.player.getPitch());
-		if(MathHelper.abs(diffYaw) < 1 && MathHelper.abs(diffPitch) < 1)
+		int diffYaw = (int)(nextYaw - MC.player.getYRot());
+		int diffPitch = (int)(nextPitch - MC.player.getXRot());
+		if(Mth.abs(diffYaw) < 1 && Mth.abs(diffPitch) < 1)
 			return;
 		
 		event.setDeltaX(event.getDefaultDeltaX() + diffYaw);
@@ -264,64 +257,32 @@ public final class KillauraLegitHack extends Hack implements UpdateListener,
 	}
 	
 	@Override
-	public void onRender(MatrixStack matrixStack, float partialTicks)
+	public void onRender(PoseStack matrixStack, float partialTicks)
 	{
 		if(target == null || !damageIndicator.isChecked())
 			return;
 		
-		// GL settings
-		GL11.glEnable(GL11.GL_BLEND);
-		GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
-		GL11.glEnable(GL11.GL_CULL_FACE);
-		GL11.glDisable(GL11.GL_DEPTH_TEST);
-		
-		matrixStack.push();
-		
-		RegionPos region = RenderUtils.getCameraRegion();
-		RenderUtils.applyRegionalRenderOffset(matrixStack, region);
-		
-		Box box = new Box(BlockPos.ORIGIN);
 		float p = 1;
 		if(target instanceof LivingEntity le)
 			p = (le.getMaxHealth() - le.getHealth()) / le.getMaxHealth();
 		float red = p * 2F;
 		float green = 2 - red;
+		float[] rgb = {red, green, 0};
+		int quadColor = RenderUtils.toIntColor(rgb, 0.25F);
+		int lineColor = RenderUtils.toIntColor(rgb, 0.5F);
 		
-		Vec3d lerpedPos = EntityUtils.getLerpedPos(target, partialTicks)
-			.subtract(region.toVec3d());
-		matrixStack.translate(lerpedPos.x, lerpedPos.y, lerpedPos.z);
-		
-		matrixStack.translate(0, 0.05, 0);
-		matrixStack.scale(target.getWidth(), target.getHeight(),
-			target.getWidth());
-		matrixStack.translate(-0.5, 0, -0.5);
-		
+		AABB box = EntityUtils.getLerpedBox(target, partialTicks);
 		if(p < 1)
-		{
-			matrixStack.translate(0.5, 0.5, 0.5);
-			matrixStack.scale(p, p, p);
-			matrixStack.translate(-0.5, -0.5, -0.5);
-		}
+			box = box.deflate((1 - p) * 0.5 * box.getXsize(),
+				(1 - p) * 0.5 * box.getYsize(), (1 - p) * 0.5 * box.getZsize());
 		
-		RenderSystem.setShader(ShaderProgramKeys.POSITION);
-		
-		RenderSystem.setShaderColor(red, green, 0, 0.25F);
-		RenderUtils.drawSolidBox(box, matrixStack);
-		
-		RenderSystem.setShaderColor(red, green, 0, 0.5F);
-		RenderUtils.drawOutlinedBox(box, matrixStack);
-		
-		matrixStack.pop();
-		
-		// GL resets
-		RenderSystem.setShaderColor(1, 1, 1, 1);
-		GL11.glEnable(GL11.GL_DEPTH_TEST);
-		GL11.glDisable(GL11.GL_BLEND);
+		RenderUtils.drawSolidBox(matrixStack, box, quadColor, false);
+		RenderUtils.drawOutlinedBox(matrixStack, box, lineColor, false);
 	}
 	
 	private enum Priority
 	{
-		DISTANCE("Distance", e -> MC.player.squaredDistanceTo(e)),
+		DISTANCE("Distance", e -> MC.player.distanceToSqr(e)),
 		
 		ANGLE("Angle",
 			e -> RotationUtils

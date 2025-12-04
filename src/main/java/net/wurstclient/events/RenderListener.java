@@ -9,22 +9,21 @@ package net.wurstclient.events;
 
 import java.util.ArrayList;
 
-import org.lwjgl.opengl.GL11;
+import com.mojang.blaze3d.vertex.PoseStack;
 
-import net.minecraft.client.util.math.MatrixStack;
 import net.wurstclient.event.Event;
 import net.wurstclient.event.Listener;
 
 public interface RenderListener extends Listener
 {
-	public void onRender(MatrixStack matrixStack, float partialTicks);
+	public void onRender(PoseStack matrixStack, float partialTicks);
 	
 	public static class RenderEvent extends Event<RenderListener>
 	{
-		private final MatrixStack matrixStack;
+		private final PoseStack matrixStack;
 		private final float partialTicks;
 		
-		public RenderEvent(MatrixStack matrixStack, float partialTicks)
+		public RenderEvent(PoseStack matrixStack, float partialTicks)
 		{
 			this.matrixStack = matrixStack;
 			this.partialTicks = partialTicks;
@@ -33,12 +32,8 @@ public interface RenderListener extends Listener
 		@Override
 		public void fire(ArrayList<RenderListener> listeners)
 		{
-			GL11.glEnable(GL11.GL_LINE_SMOOTH);
-			
 			for(RenderListener listener : listeners)
 				listener.onRender(matrixStack, partialTicks);
-			
-			GL11.glDisable(GL11.GL_LINE_SMOOTH);
 		}
 		
 		@Override

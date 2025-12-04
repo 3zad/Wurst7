@@ -13,20 +13,18 @@ import java.util.Map.Entry;
 import java.util.TreeMap;
 
 import org.lwjgl.glfw.GLFW;
-import org.lwjgl.opengl.GL11;
-
-import com.mojang.blaze3d.systems.RenderSystem;
 
 import net.fabricmc.fabric.api.client.screen.v1.Screens;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.ClickableWidget;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.text.Text;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.network.chat.Component;
 import net.wurstclient.WurstClient;
 import net.wurstclient.clickgui.ClickGui;
 import net.wurstclient.keybinds.PossibleKeybind;
-import net.wurstclient.util.RenderUtils;
 
 public class NavigatorRemoveKeybindScreen extends NavigatorScreen
 {
@@ -35,7 +33,7 @@ public class NavigatorRemoveKeybindScreen extends NavigatorScreen
 	private String hoveredKey = "";
 	private String selectedKey = "";
 	private String text = "Select the keybind you want to remove.";
-	private ButtonWidget removeButton;
+	private Button removeButton;
 	
 	public NavigatorRemoveKeybindScreen(
 		TreeMap<String, PossibleKeybind> existingKeybinds,
@@ -48,17 +46,16 @@ public class NavigatorRemoveKeybindScreen extends NavigatorScreen
 	@Override
 	protected void onResize()
 	{
-		// OK button
 		removeButton =
-			ButtonWidget.builder(Text.literal("Remove"), b -> remove())
-				.dimensions(width / 2 - 151, height - 65, 149, 18).build();
+			Button.builder(Component.literal("Remove"), b -> remove())
+				.bounds(width / 2 - 151, height - 65, 149, 18).build();
 		removeButton.active = !selectedKey.isEmpty();
-		addDrawableChild(removeButton);
+		addRenderableWidget(removeButton);
 		
-		// cancel button
-		addDrawableChild(ButtonWidget
-			.builder(Text.literal("Cancel"), b -> client.setScreen(parent))
-			.dimensions(width / 2 + 2, height - 65, 149, 18).build());
+		addRenderableWidget(Button
+			.builder(Component.literal("Cancel"),
+				b -> minecraft.setScreen(parent))
+			.bounds(width / 2 + 2, height - 65, 149, 18).build());
 	}
 	
 	private void remove()
@@ -91,20 +88,22 @@ public class NavigatorRemoveKeybindScreen extends NavigatorScreen
 		WurstClient.INSTANCE.getNavigator()
 			.addPreference(parent.getFeature().getName());
 		
-		client.setScreen(parent);
+		minecraft.setScreen(parent);
 	}
 	
 	@Override
-	protected void onKeyPress(int keyCode, int scanCode, int int_3)
+	protected void onKeyPress(KeyEvent context)
 	{
-		if(keyCode == GLFW.GLFW_KEY_ESCAPE
-			|| keyCode == GLFW.GLFW_KEY_BACKSPACE)
-			client.setScreen(parent);
+		if(context.key() == GLFW.GLFW_KEY_ESCAPE
+			|| context.key() == GLFW.GLFW_KEY_BACKSPACE)
+			minecraft.setScreen(parent);
 	}
 	
 	@Override
-	protected void onMouseClick(double x, double y, int button)
+	protected void onMouseClick(MouseButtonEvent context)
 	{
+		int button = context.button();
+		
 		// back button
 		if(button == GLFW.GLFW_MOUSE_BUTTON_4)
 		{
@@ -123,22 +122,19 @@ public class NavigatorRemoveKeybindScreen extends NavigatorScreen
 	@Override
 	protected void onUpdate()
 	{
-		// content height
 		setContentHeight(existingKeybinds.size() * 24 - 10);
 	}
 	
 	@Override
-	protected void onRender(DrawContext context, int mouseX, int mouseY,
+	protected void onRender(GuiGraphics context, int mouseX, int mouseY,
 		float partialTicks)
 	{
-		MatrixStack matrixStack = context.getMatrices();
 		ClickGui gui = WurstClient.INSTANCE.getGui();
+		Font tr = minecraft.font;
 		int txtColor = gui.getTxtColor();
 		
 		// title bar
-		context.drawCenteredTextWithShadow(client.textRenderer,
-			"Remove Keybind", middleX, 32, txtColor);
-		GL11.glEnable(GL11.GL_BLEND);
+		context.drawCenteredString(tr, "Remove Keybind", middleX, 32, txtColor);
 		
 		// background
 		int bgx1 = middleX - 154;
@@ -148,7 +144,7 @@ public class NavigatorRemoveKeybindScreen extends NavigatorScreen
 		boolean noButtons = Screens.getButtons(this).isEmpty();
 		int bgy3 = bgy2 - (noButtons ? 0 : 24);
 		
-		RenderUtils.enableScissor(context, bgx1, bgy1, bgx2, bgy3);
+		context.enableScissor(bgx1, bgy1, bgx2, bgy3);
 		
 		// possible keybinds
 		hoveredKey = "";
@@ -166,46 +162,43 @@ public class NavigatorRemoveKeybindScreen extends NavigatorScreen
 			int y2 = y1 + 20;
 			
 			// color
+			int buttonColor;
 			if(mouseX >= x1 && mouseX <= x2 && mouseY >= y1 && mouseY <= y2)
 			{
 				hoveredKey = key;
 				if(key.equals(selectedKey))
-					RenderSystem.setShaderColor(0F, 1F, 0F, 0.375F);
+					buttonColor = 0x6000FF00;
 				else
-					RenderSystem.setShaderColor(0.25F, 0.25F, 0.25F, 0.375F);
+					buttonColor = 0x60404040;
 			}else if(key.equals(selectedKey))
-				RenderSystem.setShaderColor(0F, 1F, 0F, 0.25F);
+				buttonColor = 0x4000FF00;
 			else
-				RenderSystem.setShaderColor(0.25F, 0.25F, 0.25F, 0.25F);
+				buttonColor = 0x40404040;
 			
 			// button
-			drawBox(matrixStack, x1, y1, x2, y2);
+			drawBox(context, x1, y1, x2, y2, buttonColor);
 			
 			// text
-			context.drawTextWithShadow(client.textRenderer,
-				key.replace("key.keyboard.", "") + ": "
-					+ keybind.getDescription(),
-				x1 + 1, y1 + 1, txtColor);
-			context.drawTextWithShadow(client.textRenderer,
-				keybind.getCommand(), x1 + 1,
-				y1 + 1 + client.textRenderer.fontHeight, txtColor);
-			GL11.glEnable(GL11.GL_BLEND);
+			context.guiRenderState.up();
+			context.drawString(tr, key.replace("key.keyboard.", "") + ": "
+				+ keybind.getDescription(), x1 + 1, y1 + 1, txtColor);
+			context.drawString(tr, keybind.getCommand(), x1 + 1,
+				y1 + 1 + tr.lineHeight, txtColor);
 		}
 		
 		// text
 		int textY = bgy1 + scroll + 2;
+		context.guiRenderState.up();
 		for(String line : text.split("\n"))
 		{
-			context.drawTextWithShadow(client.textRenderer, line, bgx1 + 2,
-				textY, txtColor);
-			textY += client.textRenderer.fontHeight;
+			context.drawString(tr, line, bgx1 + 2, textY, txtColor);
+			textY += tr.lineHeight;
 		}
-		GL11.glEnable(GL11.GL_BLEND);
 		
-		RenderUtils.disableScissor(context);
+		context.disableScissor();
 		
 		// buttons below scissor box
-		for(ClickableWidget button : Screens.getButtons(this))
+		for(AbstractWidget button : Screens.getButtons(this))
 		{
 			// positions
 			int x1 = button.getX();
@@ -214,22 +207,23 @@ public class NavigatorRemoveKeybindScreen extends NavigatorScreen
 			int y2 = y1 + 18;
 			
 			// color
+			int buttonColor;
 			if(!button.active)
-				RenderSystem.setShaderColor(0F, 0F, 0F, 0.25F);
+				buttonColor = 0x40000000;
 			else if(mouseX >= x1 && mouseX <= x2 && mouseY >= y1
 				&& mouseY <= y2)
-				RenderSystem.setShaderColor(0.375F, 0.375F, 0.375F, 0.25F);
+				buttonColor = 0x40606060;
 			else
-				RenderSystem.setShaderColor(0.25F, 0.25F, 0.25F, 0.25F);
+				buttonColor = 0x40404040;
 			
 			// button
-			drawBox(matrixStack, x1, y1, x2, y2);
+			drawBox(context, x1, y1, x2, y2, buttonColor);
 			
 			// text
-			context.drawCenteredTextWithShadow(client.textRenderer,
-				button.getMessage().getString(), (x1 + x2) / 2, y1 + 5,
+			String buttonText = button.getMessage().getString();
+			context.guiRenderState.up();
+			context.drawCenteredString(tr, buttonText, (x1 + x2) / 2, y1 + 5,
 				txtColor);
-			GL11.glEnable(GL11.GL_BLEND);
 		}
 	}
 	

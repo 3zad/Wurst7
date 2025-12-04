@@ -7,120 +7,59 @@
  */
 package net.wurstclient.mixin;
 
-import org.joml.Matrix4f;
-import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
+import com.llamalad7.mixinextras.injector.ModifyReturnValue;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
-import com.llamalad7.mixinextras.sugar.Local;
+import com.mojang.blaze3d.vertex.PoseStack;
 
-import net.minecraft.client.render.Camera;
-import net.minecraft.client.render.GameRenderer;
-import net.minecraft.client.render.RenderTickCounter;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.util.hit.HitResult;
+import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.phys.HitResult;
 import net.wurstclient.WurstClient;
 import net.wurstclient.event.EventManager;
 import net.wurstclient.events.CameraTransformViewBobbingListener.CameraTransformViewBobbingEvent;
-import net.wurstclient.events.RenderListener.RenderEvent;
 import net.wurstclient.hacks.FullbrightHack;
 
 @Mixin(GameRenderer.class)
 public abstract class GameRendererMixin implements AutoCloseable
 {
-	@Unique
-	private boolean cancelNextBobView;
-	
-	/**
-	 * Fires the CameraTransformViewBobbingEvent event and records whether the
-	 * next view-bobbing call should be cancelled.
-	 */
-	@Inject(at = @At(value = "INVOKE",
-		target = "Lnet/minecraft/client/render/GameRenderer;bobView(Lnet/minecraft/client/util/math/MatrixStack;F)V",
+	@WrapOperation(at = @At(value = "INVOKE",
+		target = "Lnet/minecraft/client/renderer/GameRenderer;bobView(Lcom/mojang/blaze3d/vertex/PoseStack;F)V",
 		ordinal = 0),
-		method = "renderWorld(Lnet/minecraft/client/render/RenderTickCounter;)V")
-	private void onRenderWorldViewBobbing(RenderTickCounter tickCounter,
-		CallbackInfo ci)
+		method = "renderLevel(Lnet/minecraft/client/DeltaTracker;)V")
+	private void onBobView(GameRenderer instance, PoseStack matrices,
+		float tickDelta, Operation<Void> original)
 	{
 		CameraTransformViewBobbingEvent event =
 			new CameraTransformViewBobbingEvent();
 		EventManager.fire(event);
 		
-		if(event.isCancelled())
-			cancelNextBobView = true;
+		if(!event.isCancelled())
+			original.call(instance, matrices, tickDelta);
 	}
 	
-	/**
-	 * Cancels the view-bobbing call if requested by the last
-	 * CameraTransformViewBobbingEvent.
-	 */
-	@Inject(at = @At("HEAD"),
-		method = "bobView(Lnet/minecraft/client/util/math/MatrixStack;F)V",
-		cancellable = true)
-	private void onBobView(MatrixStack matrices, float tickDelta,
-		CallbackInfo ci)
+	@ModifyReturnValue(at = @At("RETURN"),
+		method = "getFov(Lnet/minecraft/client/Camera;FZ)F")
+	private float onGetFov(float original)
 	{
-		if(!cancelNextBobView)
-			return;
-		
-		ci.cancel();
-		cancelNextBobView = false;
-	}
-	
-	/**
-	 * This mixin is injected into a random method call later in the
-	 * renderWorld() method to ensure that cancelNextBobView is always reset
-	 * after the view-bobbing call.
-	 */
-	@Inject(at = @At("HEAD"),
-		method = "renderHand(Lnet/minecraft/client/render/Camera;FLorg/joml/Matrix4f;)V")
-	private void onRenderHand(Camera camera, float tickDelta, Matrix4f matrix4f,
-		CallbackInfo ci)
-	{
-		cancelNextBobView = false;
-	}
-	
-	@Inject(
-		at = @At(value = "FIELD",
-			target = "Lnet/minecraft/client/render/GameRenderer;renderHand:Z",
-			opcode = Opcodes.GETFIELD,
-			ordinal = 0),
-		method = "renderWorld(Lnet/minecraft/client/render/RenderTickCounter;)V")
-	private void onRenderWorldHandRendering(RenderTickCounter tickCounter,
-		CallbackInfo ci, @Local(ordinal = 2) Matrix4f matrix4f3,
-		@Local(ordinal = 1) float tickDelta)
-	{
-		MatrixStack matrixStack = new MatrixStack();
-		matrixStack.multiplyPositionMatrix(matrix4f3);
-		RenderEvent event = new RenderEvent(matrixStack, tickDelta);
-		EventManager.fire(event);
-	}
-	
-	@Inject(at = @At(value = "RETURN", ordinal = 1),
-		method = "getFov(Lnet/minecraft/client/render/Camera;FZ)F",
-		cancellable = true)
-	private void onGetFov(Camera camera, float tickDelta, boolean changingFov,
-		CallbackInfoReturnable<Float> cir)
-	{
-		cir.setReturnValue(WurstClient.INSTANCE.getOtfs().zoomOtf
-			.changeFovBasedOnZoom(cir.getReturnValueF()));
+		return WurstClient.INSTANCE.getOtfs().zoomOtf
+			.changeFovBasedOnZoom(original);
 	}
 	
 	/**
 	 * This is the part that makes Liquids work.
 	 */
 	@WrapOperation(at = @At(value = "INVOKE",
-		target = "Lnet/minecraft/entity/Entity;raycast(DFZ)Lnet/minecraft/util/hit/HitResult;",
+		target = "Lnet/minecraft/world/entity/Entity;pick(DFZ)Lnet/minecraft/world/phys/HitResult;",
 		ordinal = 0),
-		method = "findCrosshairTarget(Lnet/minecraft/entity/Entity;DDF)Lnet/minecraft/util/hit/HitResult;")
+		method = "pick(Lnet/minecraft/world/entity/Entity;DDF)Lnet/minecraft/world/phys/HitResult;")
 	private HitResult liquidsRaycast(Entity instance, double maxDistance,
 		float tickDelta, boolean includeFluids, Operation<HitResult> original)
 	{
@@ -133,9 +72,9 @@ public abstract class GameRendererMixin implements AutoCloseable
 	
 	@WrapOperation(
 		at = @At(value = "INVOKE",
-			target = "Lnet/minecraft/util/math/MathHelper;lerp(FFF)F",
+			target = "Lnet/minecraft/util/Mth;lerp(FFF)F",
 			ordinal = 0),
-		method = "renderWorld(Lnet/minecraft/client/render/RenderTickCounter;)V")
+		method = "renderLevel(Lnet/minecraft/client/DeltaTracker;)V")
 	private float onRenderWorldNauseaLerp(float delta, float start, float end,
 		Operation<Float> original)
 	{
@@ -146,7 +85,7 @@ public abstract class GameRendererMixin implements AutoCloseable
 	}
 	
 	@Inject(at = @At("HEAD"),
-		method = "getNightVisionStrength(Lnet/minecraft/entity/LivingEntity;F)F",
+		method = "getNightVisionScale(Lnet/minecraft/world/entity/LivingEntity;F)F",
 		cancellable = true)
 	private static void onGetNightVisionStrength(LivingEntity entity,
 		float tickDelta, CallbackInfoReturnable<Float> cir)
@@ -159,9 +98,9 @@ public abstract class GameRendererMixin implements AutoCloseable
 	}
 	
 	@Inject(at = @At("HEAD"),
-		method = "tiltViewWhenHurt(Lnet/minecraft/client/util/math/MatrixStack;F)V",
+		method = "bobHurt(Lcom/mojang/blaze3d/vertex/PoseStack;F)V",
 		cancellable = true)
-	private void onTiltViewWhenHurt(MatrixStack matrices, float tickDelta,
+	private void onTiltViewWhenHurt(PoseStack matrices, float tickDelta,
 		CallbackInfo ci)
 	{
 		if(WurstClient.INSTANCE.getHax().noHurtcamHack.isEnabled())

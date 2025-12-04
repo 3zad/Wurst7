@@ -13,7 +13,6 @@ import java.nio.file.Path;
 
 import com.google.gson.JsonObject;
 
-import net.wurstclient.analytics.dmurph.VisitorData;
 import net.wurstclient.util.json.JsonException;
 import net.wurstclient.util.json.JsonUtils;
 import net.wurstclient.util.json.WsonObject;
@@ -21,19 +20,19 @@ import net.wurstclient.util.json.WsonObject;
 public final class AnalyticsConfigFile
 {
 	private final Path path;
+	private boolean disableSaving;
 	
 	public AnalyticsConfigFile(Path path)
 	{
 		this.path = path;
 	}
 	
-	public void load(WurstAnalyticsTracker tracker)
+	public void load(PlausibleAnalytics plausible)
 	{
 		try
 		{
 			WsonObject wson = JsonUtils.parseFileToObject(path);
-			tracker.setEnabled(wson.getBoolean("enabled"));
-			tracker.getConfigData().setVisitorData(readVisitorData(wson));
+			loadJson(wson, plausible);
 			
 		}catch(NoSuchFileException e)
 		{
@@ -45,30 +44,34 @@ public final class AnalyticsConfigFile
 			e.printStackTrace();
 		}
 		
-		save(tracker);
+		save(plausible);
 	}
 	
-	private VisitorData readVisitorData(WsonObject wson) throws JsonException
+	private void loadJson(WsonObject wson, PlausibleAnalytics plausible)
+		throws JsonException
 	{
-		int visitorID = wson.getInt("id");
-		long firstLaunch = wson.getLong("first_launch");
-		long lastLaunch = wson.getLong("last_launch");
-		int launches = wson.getInt("launches");
-		
-		VisitorData visitorData = VisitorData.newSession(visitorID, firstLaunch,
-			lastLaunch, launches);
-		
-		// change visitor ID after 3 days
-		if(visitorData.getTimestampCurrent()
-			- visitorData.getTimestampFirst() >= 259200)
-			visitorData = VisitorData.newVisitor();
-		
-		return visitorData;
+		try
+		{
+			disableSaving = true;
+			
+			// v1 was bugged, don't load it
+			if(!wson.has("version"))
+				return;
+			
+			plausible.setEnabled(wson.getBoolean("enabled"));
+			
+		}finally
+		{
+			disableSaving = false;
+		}
 	}
 	
-	public void save(WurstAnalyticsTracker tracker)
+	public void save(PlausibleAnalytics plausible)
 	{
-		JsonObject json = createJson(tracker);
+		if(disableSaving)
+			return;
+		
+		JsonObject json = createJson(plausible);
 		
 		try
 		{
@@ -81,17 +84,11 @@ public final class AnalyticsConfigFile
 		}
 	}
 	
-	private JsonObject createJson(WurstAnalyticsTracker tracker)
+	private JsonObject createJson(PlausibleAnalytics plausible)
 	{
 		JsonObject json = new JsonObject();
-		json.addProperty("enabled", tracker.isEnabled());
-		
-		VisitorData visitorData = tracker.getConfigData().getVisitorData();
-		json.addProperty("id", visitorData.getVisitorId());
-		json.addProperty("first_launch", visitorData.getTimestampFirst());
-		json.addProperty("last_launch", visitorData.getTimestampCurrent());
-		json.addProperty("launches", visitorData.getVisits());
-		
+		json.addProperty("version", 2);
+		json.addProperty("enabled", plausible.isEnabled());
 		return json;
 	}
 }

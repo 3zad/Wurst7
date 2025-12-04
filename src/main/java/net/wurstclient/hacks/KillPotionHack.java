@@ -10,20 +10,21 @@ package net.wurstclient.hacks;
 import java.util.List;
 import java.util.Optional;
 
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.PotionContentsComponent;
-import net.minecraft.entity.effect.StatusEffectInstance;
-import net.minecraft.entity.effect.StatusEffects;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.CreativeInventoryActionC2SPacket;
-import net.minecraft.text.Text;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.alchemy.PotionContents;
 import net.wurstclient.Category;
 import net.wurstclient.SearchTags;
 import net.wurstclient.hack.Hack;
 import net.wurstclient.settings.EnumSetting;
 import net.wurstclient.util.ChatUtils;
+import net.wurstclient.util.InventoryUtils;
 
 @SearchTags({"kill potion", "KillerPotion", "killer potion", "KillingPotion",
 	"killing potion", "InstantDeathPotion", "instant death potion"})
@@ -45,7 +46,7 @@ public final class KillPotionHack extends Hack
 	protected void onEnable()
 	{
 		// check gamemode
-		if(!MC.player.getAbilities().creativeMode)
+		if(!MC.player.getAbilities().instabuild)
 		{
 			ChatUtils.error("Creative mode only.");
 			setEnabled(false);
@@ -56,27 +57,17 @@ public final class KillPotionHack extends Hack
 		ItemStack stack = potionType.getSelected().createPotionStack();
 		
 		// give potion
-		if(placeStackInHotbar(stack))
-			ChatUtils.message("Potion created.");
+		Inventory inventory = MC.player.getInventory();
+		int slot = inventory.getFreeSlot();
+		if(slot < 0)
+			ChatUtils.error("Cannot give potion. Your inventory is full.");
 		else
-			ChatUtils.error("Please clear a slot in your hotbar.");
-		
-		setEnabled(false);
-	}
-	
-	private boolean placeStackInHotbar(ItemStack stack)
-	{
-		for(int i = 0; i < 9; i++)
 		{
-			if(!MC.player.getInventory().getStack(i).isEmpty())
-				continue;
-			
-			MC.player.networkHandler.sendPacket(
-				new CreativeInventoryActionC2SPacket(36 + i, stack));
-			return true;
+			InventoryUtils.setCreativeStack(slot, stack);
+			ChatUtils.message("Potion created.");
 		}
 		
-		return false;
+		setEnabled(false);
 	}
 	
 	private enum PotionType
@@ -111,18 +102,17 @@ public final class KillPotionHack extends Hack
 		{
 			ItemStack stack = new ItemStack(item);
 			
-			StatusEffectInstance effect = new StatusEffectInstance(
-				StatusEffects.INSTANT_HEALTH, 2000, 125);
+			MobEffectInstance effect =
+				new MobEffectInstance(MobEffects.INSTANT_HEALTH, 2000, 125);
 			
-			PotionContentsComponent potionContents =
-				new PotionContentsComponent(Optional.empty(), Optional.empty(),
-					List.of(effect), Optional.empty());
+			PotionContents potionContents = new PotionContents(Optional.empty(),
+				Optional.empty(), List.of(effect), Optional.empty());
 			
-			stack.set(DataComponentTypes.POTION_CONTENTS, potionContents);
+			stack.set(DataComponents.POTION_CONTENTS, potionContents);
 			
 			String name =
 				"\u00a7f" + itemName + " of \u00a74\u00a7lINSTANT DEATH";
-			stack.set(DataComponentTypes.CUSTOM_NAME, Text.literal(name));
+			stack.set(DataComponents.CUSTOM_NAME, Component.literal(name));
 			
 			return stack;
 		}

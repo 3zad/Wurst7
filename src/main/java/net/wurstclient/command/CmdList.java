@@ -11,8 +11,8 @@ import java.lang.reflect.Field;
 import java.util.Collection;
 import java.util.TreeMap;
 
-import net.minecraft.util.crash.CrashException;
-import net.minecraft.util.crash.CrashReport;
+import net.minecraft.CrashReport;
+import net.minecraft.ReportedException;
 import net.wurstclient.commands.*;
 
 public final class CmdList
@@ -66,6 +66,7 @@ public final class CmdList
 	public final TpCmd tpCmd = new TpCmd();
 	public final UnbindCmd unbindCmd = new UnbindCmd();
 	public final VClipCmd vClipCmd = new VClipCmd();
+	public final ViewCompCmd viewCompCmd = new ViewCompCmd();
 	public final ViewNbtCmd viewNbtCmd = new ViewNbtCmd();
 	public final XrayCmd xrayCmd = new XrayCmd();
 	
@@ -88,8 +89,8 @@ public final class CmdList
 		}catch(Exception e)
 		{
 			String message = "Initializing Wurst commands";
-			CrashReport report = CrashReport.create(e, message);
-			throw new CrashException(report);
+			CrashReport report = CrashReport.forThrowable(e, message);
+			throw new ReportedException(report);
 		}
 	}
 	

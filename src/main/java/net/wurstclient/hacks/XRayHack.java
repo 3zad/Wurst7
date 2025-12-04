@@ -15,10 +15,10 @@ import java.util.stream.Stream;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.ModContainer;
 import net.fabricmc.loader.api.metadata.ModMetadata;
-import net.minecraft.block.Block;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.Block;
 import net.wurstclient.Category;
 import net.wurstclient.SearchTags;
 import net.wurstclient.clickgui.screens.EditBlockListScreen;
@@ -74,7 +74,8 @@ public final class XRayHack extends Hack implements UpdateListener,
 		"minecraft:sculk_shrieker", "minecraft:spawner",
 		"minecraft:suspicious_gravel", "minecraft:suspicious_sand",
 		"minecraft:tnt", "minecraft:torch", "minecraft:trapped_chest",
-		"minecraft:trial_spawner", "minecraft:vault", "minecraft:water");
+		"minecraft:trial_spawner", "minecraft:vault", "minecraft:wall_torch",
+		"minecraft:water");
 	
 	private final CheckboxSetting onlyExposed = new CheckboxSetting(
 		"Only show exposed",
@@ -85,7 +86,6 @@ public final class XRayHack extends Hack implements UpdateListener,
 	
 	private final SliderSetting opacity = new SliderSetting("Opacity",
 		"Opacity of non-ore blocks when X-Ray is enabled.\n\n"
-			+ "Does not work when Sodium is installed.\n\n"
 			+ "Remember to restart X-Ray when changing this setting.",
 		0, 0, 0.99, 0.01, ValueDisplay.PERCENTAGE.withLabel(0, "off"));
 	
@@ -94,8 +94,8 @@ public final class XRayHack extends Hack implements UpdateListener,
 		Math.random() < 0.01 ? "X-Wurst" : getName();
 	
 	private ArrayList<String> oreNamesCache;
-	private final ThreadLocal<BlockPos.Mutable> mutablePosForExposedCheck =
-		ThreadLocal.withInitial(BlockPos.Mutable::new);
+	private final ThreadLocal<BlockPos.MutableBlockPos> mutablePosForExposedCheck =
+		ThreadLocal.withInitial(BlockPos.MutableBlockPos::new);
 	
 	public XRayHack()
 	{
@@ -127,7 +127,7 @@ public final class XRayHack extends Hack implements UpdateListener,
 		EVENTS.add(RenderBlockEntityListener.class, this);
 		
 		// reload chunks
-		MC.worldRenderer.reload();
+		MC.levelRenderer.allChanged();
 		
 		// display warning if OptiFine is detected
 		if(optiFineWarning != null)
@@ -145,12 +145,12 @@ public final class XRayHack extends Hack implements UpdateListener,
 		EVENTS.remove(RenderBlockEntityListener.class, this);
 		
 		// reload chunks
-		MC.worldRenderer.reload();
+		MC.levelRenderer.allChanged();
 		
 		// reset gamma
 		FullbrightHack fullbright = WURST.getHax().fullbrightHack;
 		if(!fullbright.isChangingGamma())
-			ISimpleOption.get(MC.options.getGamma())
+			ISimpleOption.get(MC.options.gamma())
 				.forceSetValue(fullbright.getDefaultGamma());
 	}
 	
@@ -158,7 +158,7 @@ public final class XRayHack extends Hack implements UpdateListener,
 	public void onUpdate()
 	{
 		// force gamma to 16 so that ores are bright enough to see
-		ISimpleOption.get(MC.options.getGamma()).forceSetValue(16.0);
+		ISimpleOption.get(MC.options.gamma()).forceSetValue(16.0);
 	}
 	
 	@Override
@@ -188,7 +188,7 @@ public final class XRayHack extends Hack implements UpdateListener,
 	@Override
 	public void onRenderBlockEntity(RenderBlockEntityEvent event)
 	{
-		BlockPos pos = event.getBlockEntity().getPos();
+		BlockPos pos = event.getState().blockPos;
 		if(!isVisible(BlockUtils.getBlock(pos), pos))
 			event.cancel();
 	}
@@ -207,9 +207,10 @@ public final class XRayHack extends Hack implements UpdateListener,
 	
 	private boolean isExposed(BlockPos pos)
 	{
-		BlockPos.Mutable mutablePos = mutablePosForExposedCheck.get();
+		BlockPos.MutableBlockPos mutablePos = mutablePosForExposedCheck.get();
 		for(Direction direction : Direction.values())
-			if(!BlockUtils.isOpaqueFullCube(mutablePos.set(pos, direction)))
+			if(!BlockUtils
+				.isOpaqueFullCube(mutablePos.setWithOffset(pos, direction)))
 				return true;
 			
 		return false;

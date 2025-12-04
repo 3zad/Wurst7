@@ -8,17 +8,16 @@
     "Alexander01998"
   ],
   "contact": {
-    "homepage": "https://www.wurstclient.net/?utm_source=Wurst+Client&utm_medium=ModMenu&utm_content=Website",
-    "issues": "https://www.wurstclient.net/wurst7issues/",
-    "sources": "https://www.wurstclient.net/wurst7sources/"
+    "homepage": "https://www.wurstclient.net/modmenu-homepage/",
+    "sources": "https://www.wurstclient.net/modmenu-sources/",
+    "issues": "https://www.wurstclient.net/modmenu-issues/"
   },
   "license": "GPL-3.0-or-later",
   "icon": "assets/wurst/icon.png",
   "environment": "client",
   "entrypoints": {
     "main": [
-      "net.wurstclient.WurstInitializer",
-      "net.wurstclient.test.WurstE2ETestClient"
+      "net.wurstclient.WurstInitializer"
     ]
   },
   "mixins": [
@@ -26,9 +25,9 @@
   ],
   "accessWidener": "wurst.accesswidener",
   "depends": {
-    "fabricloader": ">=0.16.9",
-    "fabric-api": ">=0.110.5",
-    "minecraft": "~1.21.4-rc.3",
+    "fabricloader": ">=0.17.0",
+    "fabric-api": ">=0.133.7",
+    "minecraft": "~1.21.9-beta.2",
     "java": ">=21"
   },
   "suggests": {
@@ -42,9 +41,10 @@
   "custom": {
     "modmenu": {
       "links": {
-        "Wiki": "https://wurst.wiki/?utm_source=Wurst+Client&utm_medium=ModMenu&utm_content=Wiki",
-        "Forum": "https://wurstforum.net/?utm_source=Wurst+Client&utm_medium=ModMenu&utm_content=Forum",
-        "Donate": "https://www.wurstclient.net/donate/?utm_source=Wurst+Client&utm_medium=ModMenu&utm_content=Donate"
+        "modmenu.donate": "https://www.wurstclient.net/modmenu-donate/",
+        "modmenu.twitter": "https://www.wurstclient.net/modmenu-twitter/",
+        "modmenu.wiki": "https://www.wurstclient.net/modmenu-wiki/",
+        "Forum": "https://www.wurstclient.net/modmenu-forum/"
       }
     }
   }

@@ -7,190 +7,65 @@
  */
 package net.wurstclient.hacks.autofarm;
 
+import java.util.Collection;
 import java.util.List;
-import java.util.Objects;
-import java.util.Set;
 import java.util.stream.Stream;
 
-import org.joml.Matrix4f;
-import org.lwjgl.opengl.GL11;
+import com.mojang.blaze3d.vertex.PoseStack;
 
-import com.mojang.blaze3d.systems.RenderSystem;
-
-import net.minecraft.client.gl.GlUsage;
-import net.minecraft.client.gl.ShaderProgram;
-import net.minecraft.client.gl.ShaderProgramKeys;
-import net.minecraft.client.gl.VertexBuffer;
-import net.minecraft.client.render.BufferBuilder;
-import net.minecraft.client.render.BuiltBuffer;
-import net.minecraft.client.render.Tessellator;
-import net.minecraft.client.render.VertexFormat;
-import net.minecraft.client.render.VertexFormats;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.AABB;
+import net.wurstclient.settings.CheckboxSetting;
+import net.wurstclient.settings.Setting;
 import net.wurstclient.util.RenderUtils;
 
 public final class AutoFarmRenderer
 {
-	private VertexBuffer greenBuffer;
-	private VertexBuffer cyanBuffer;
-	private VertexBuffer redBuffer;
+	private static final AABB BLOCK_BOX =
+		new AABB(BlockPos.ZERO).deflate(1 / 16.0);
+	private static final AABB NODE_BOX = new AABB(BlockPos.ZERO).deflate(0.25);
 	
-	public void reset()
+	public final CheckboxSetting drawReplantingSpots =
+		new CheckboxSetting("Draw replanting spots", true);
+	public final CheckboxSetting drawBlocksToHarvest =
+		new CheckboxSetting("Draw blocks to harvest", true);
+	public final CheckboxSetting drawBlocksToReplant =
+		new CheckboxSetting("Draw blocks to replant", true);
+	
+	private List<AABB> replantingSpots = List.of();
+	private List<AABB> blocksToHarvest = List.of();
+	private List<AABB> blocksToReplant = List.of();
+	
+	public void update(Collection<BlockPos> replantingSpots,
+		Collection<BlockPos> blocksToHarvest,
+		Collection<BlockPos> blocksToReplant)
 	{
-		Stream.of(greenBuffer, cyanBuffer, redBuffer).filter(Objects::nonNull)
-			.forEach(VertexBuffer::close);
-		greenBuffer = cyanBuffer = redBuffer = null;
+		this.replantingSpots =
+			replantingSpots.stream().map(NODE_BOX::move).toList();
+		this.blocksToHarvest =
+			blocksToHarvest.stream().map(BLOCK_BOX::move).toList();
+		this.blocksToReplant =
+			blocksToReplant.stream().map(BLOCK_BOX::move).toList();
 	}
 	
-	public void render(MatrixStack matrixStack)
+	public void render(PoseStack matrixStack)
 	{
-		// GL settings
-		GL11.glEnable(GL11.GL_BLEND);
-		GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
-		GL11.glEnable(GL11.GL_CULL_FACE);
-		GL11.glDisable(GL11.GL_DEPTH_TEST);
+		if(drawReplantingSpots.isChecked())
+			RenderUtils.drawNodes(matrixStack, replantingSpots, 0x8000FFFF,
+				false);
 		
-		matrixStack.push();
+		if(drawBlocksToHarvest.isChecked())
+			RenderUtils.drawOutlinedBoxes(matrixStack, blocksToHarvest,
+				0x8000FF00, false);
 		
-		RenderUtils.applyRegionalRenderOffset(matrixStack);
-		
-		RenderSystem.setShader(ShaderProgramKeys.POSITION);
-		Matrix4f viewMatrix = matrixStack.peek().getPositionMatrix();
-		Matrix4f projMatrix = RenderSystem.getProjectionMatrix();
-		ShaderProgram shader = RenderSystem.getShader();
-		
-		if(greenBuffer != null)
-		{
-			RenderSystem.setShaderColor(0, 1, 0, 0.5F);
-			greenBuffer.bind();
-			greenBuffer.draw(viewMatrix, projMatrix, shader);
-			VertexBuffer.unbind();
-		}
-		
-		if(cyanBuffer != null)
-		{
-			RenderSystem.setShaderColor(0, 1, 1, 0.5F);
-			cyanBuffer.bind();
-			cyanBuffer.draw(viewMatrix, projMatrix, shader);
-			VertexBuffer.unbind();
-		}
-		
-		if(redBuffer != null)
-		{
-			RenderSystem.setShaderColor(1, 0, 0, 0.5F);
-			redBuffer.bind();
-			redBuffer.draw(viewMatrix, projMatrix, shader);
-			VertexBuffer.unbind();
-		}
-		
-		matrixStack.pop();
-		
-		// GL resets
-		RenderSystem.setShaderColor(1, 1, 1, 1);
-		GL11.glEnable(GL11.GL_DEPTH_TEST);
-		GL11.glDisable(GL11.GL_BLEND);
+		if(drawBlocksToReplant.isChecked())
+			RenderUtils.drawOutlinedBoxes(matrixStack, blocksToReplant,
+				0x80FF0000, false);
 	}
 	
-	public void updateVertexBuffers(List<BlockPos> blocksToHarvest,
-		Set<BlockPos> plants, List<BlockPos> blocksToReplant)
+	public Stream<Setting> getSettings()
 	{
-		Tessellator tessellator = RenderSystem.renderThreadTesselator();
-		Vec3d regionOffset = RenderUtils.getCameraRegion().negate().toVec3d();
-		
-		double boxMin = 1 / 16.0;
-		double boxMax = 15 / 16.0;
-		Box box = new Box(boxMin, boxMin, boxMin, boxMax, boxMax, boxMax);
-		Box node = new Box(0.25, 0.25, 0.25, 0.75, 0.75, 0.75);
-		
-		updateGreenBuffer(blocksToHarvest, tessellator, box, regionOffset);
-		updateCyanBuffer(plants, tessellator, node, regionOffset);
-		updateRedBuffer(blocksToReplant, tessellator, box, regionOffset);
-	}
-	
-	private void updateGreenBuffer(List<BlockPos> blocksToHarvest,
-		Tessellator tessellator, Box box, Vec3d regionOffset)
-	{
-		if(greenBuffer != null)
-		{
-			greenBuffer.close();
-			greenBuffer = null;
-		}
-		
-		if(blocksToHarvest.isEmpty())
-			return;
-		
-		greenBuffer = new VertexBuffer(GlUsage.STATIC_WRITE);
-		BufferBuilder bufferBuilder = tessellator
-			.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION);
-		
-		for(BlockPos pos : blocksToHarvest)
-		{
-			Box renderBox = box.offset(pos).offset(regionOffset);
-			RenderUtils.drawOutlinedBox(renderBox, bufferBuilder);
-		}
-		
-		BuiltBuffer buffer = bufferBuilder.end();
-		greenBuffer.bind();
-		greenBuffer.upload(buffer);
-		VertexBuffer.unbind();
-	}
-	
-	private void updateCyanBuffer(Set<BlockPos> plants, Tessellator tessellator,
-		Box node, Vec3d regionOffset)
-	{
-		if(cyanBuffer != null)
-		{
-			cyanBuffer.close();
-			cyanBuffer = null;
-		}
-		
-		if(plants.isEmpty())
-			return;
-		
-		cyanBuffer = new VertexBuffer(GlUsage.STATIC_WRITE);
-		BufferBuilder bufferBuilder = tessellator
-			.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION);
-		
-		for(BlockPos pos : plants)
-		{
-			Box renderNode = node.offset(pos).offset(regionOffset);
-			RenderUtils.drawNode(renderNode, bufferBuilder);
-		}
-		
-		BuiltBuffer buffer = bufferBuilder.end();
-		cyanBuffer.bind();
-		cyanBuffer.upload(buffer);
-		VertexBuffer.unbind();
-	}
-	
-	private void updateRedBuffer(List<BlockPos> blocksToReplant,
-		Tessellator tessellator, Box box, Vec3d regionOffset)
-	{
-		if(redBuffer != null)
-		{
-			redBuffer.close();
-			redBuffer = null;
-		}
-		
-		if(blocksToReplant.isEmpty())
-			return;
-		
-		redBuffer = new VertexBuffer(GlUsage.STATIC_WRITE);
-		BufferBuilder bufferBuilder = tessellator
-			.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION);
-		
-		for(BlockPos pos : blocksToReplant)
-		{
-			Box renderBox = box.offset(pos).offset(regionOffset);
-			RenderUtils.drawOutlinedBox(renderBox, bufferBuilder);
-		}
-		
-		BuiltBuffer buffer = bufferBuilder.end();
-		redBuffer.bind();
-		redBuffer.upload(buffer);
-		VertexBuffer.unbind();
+		return Stream.of(drawReplantingSpots, drawBlocksToHarvest,
+			drawBlocksToReplant);
 	}
 }

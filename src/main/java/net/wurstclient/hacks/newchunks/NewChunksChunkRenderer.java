@@ -9,10 +9,15 @@ package net.wurstclient.hacks.newchunks;
 
 import java.util.Set;
 
-import net.minecraft.client.render.BuiltBuffer;
-import net.minecraft.util.math.ChunkPos;
+import com.mojang.blaze3d.vertex.VertexConsumer;
+
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.world.level.ChunkPos;
 
 public interface NewChunksChunkRenderer
 {
-	public BuiltBuffer buildBuffer(Set<ChunkPos> chunks, int drawDistance);
+	public void buildBuffer(VertexConsumer buffer, Set<ChunkPos> chunks,
+		int drawDistance);
+	
+	public RenderType.CompositeRenderType getLayer();
 }

@@ -13,72 +13,71 @@ import java.util.ArrayList;
 
 import org.lwjgl.glfw.GLFW;
 
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.Drawable;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.screen.multiplayer.MultiplayerScreen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.client.network.ServerInfo;
-import net.minecraft.client.network.ServerInfo.ServerType;
-import net.minecraft.text.Text;
-import net.minecraft.util.Util;
-import net.wurstclient.mixinterface.IMultiplayerScreen;
+import net.minecraft.Util;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Renderable;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
+import net.minecraft.client.gui.screens.multiplayer.ServerSelectionList;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.client.multiplayer.ServerData.Type;
+import net.minecraft.client.multiplayer.ServerList;
+import net.minecraft.network.chat.Component;
+import net.minecraft.util.CommonColors;
 import net.wurstclient.util.MathUtils;
 
 public class ServerFinderScreen extends Screen
 {
-	private MultiplayerScreen prevScreen;
+	private final JoinMultiplayerScreen prevScreen;
 	
-	private TextFieldWidget ipBox;
-	private TextFieldWidget maxThreadsBox;
-	private ButtonWidget searchButton;
+	private EditBox ipBox;
+	private EditBox maxThreadsBox;
+	private Button searchButton;
 	
 	private ServerFinderState state;
 	private int maxThreads;
 	private int checked;
 	private int working;
 	
-	public ServerFinderScreen(MultiplayerScreen prevMultiplayerMenu)
+	public ServerFinderScreen(JoinMultiplayerScreen prevScreen)
 	{
-		super(Text.literal(""));
-		prevScreen = prevMultiplayerMenu;
+		super(Component.literal("Server Finder"));
+		this.prevScreen = prevScreen;
 	}
 	
 	@Override
 	public void init()
 	{
-		addDrawableChild(searchButton =
-			ButtonWidget.builder(Text.literal("Search"), b -> searchOrCancel())
-				.dimensions(width / 2 - 100, height / 4 + 96 + 12, 200, 20)
-				.build());
+		addRenderableWidget(searchButton = Button
+			.builder(Component.literal("Search"), b -> searchOrCancel())
+			.bounds(width / 2 - 100, height / 4 + 96 + 12, 200, 20).build());
+		searchButton.active = false;
 		
-		addDrawableChild(
-			ButtonWidget
-				.builder(Text.literal("Tutorial"),
-					b -> Util.getOperatingSystem().open(
-						"https://www.wurstclient.net/serverfinder-tutorial/"))
-				.dimensions(width / 2 - 100, height / 4 + 120 + 12, 200, 20)
-				.build());
+		addRenderableWidget(Button
+			.builder(Component.literal("Tutorial"),
+				b -> Util.getPlatform().openUri(
+					"https://www.wurstclient.net/serverfinder-tutorial/"))
+			.bounds(width / 2 - 100, height / 4 + 120 + 12, 200, 20).build());
 		
-		addDrawableChild(ButtonWidget
-			.builder(Text.literal("Back"), b -> client.setScreen(prevScreen))
-			.dimensions(width / 2 - 100, height / 4 + 144 + 12, 200, 20)
-			.build());
+		addRenderableWidget(Button
+			.builder(Component.literal("Back"), b -> onClose())
+			.bounds(width / 2 - 100, height / 4 + 144 + 12, 200, 20).build());
 		
-		ipBox = new TextFieldWidget(textRenderer, width / 2 - 100,
-			height / 4 + 34, 200, 20, Text.literal(""));
+		ipBox = new EditBox(font, width / 2 - 100, height / 4 + 34, 200, 20,
+			Component.empty());
 		ipBox.setMaxLength(200);
-		ipBox.setFocused(true);
-		addSelectableChild(ipBox);
-		
-		maxThreadsBox = new TextFieldWidget(textRenderer, width / 2 - 32,
-			height / 4 + 58, 26, 12, Text.literal(""));
-		maxThreadsBox.setMaxLength(3);
-		maxThreadsBox.setText("128");
-		addSelectableChild(maxThreadsBox);
-		
+		addWidget(ipBox);
 		setFocused(ipBox);
+		
+		maxThreadsBox = new EditBox(font, width / 2 - 32, height / 4 + 58, 26,
+			12, Component.empty());
+		maxThreadsBox.setMaxLength(3);
+		maxThreadsBox.setValue("128");
+		addWidget(maxThreadsBox);
+		
 		state = ServerFinderState.NOT_RUNNING;
 	}
 	
@@ -87,11 +86,17 @@ public class ServerFinderScreen extends Screen
 		if(state.isRunning())
 		{
 			state = ServerFinderState.CANCELLED;
+			ipBox.active = true;
+			maxThreadsBox.active = true;
+			searchButton.setMessage(Component.literal("Search"));
 			return;
 		}
 		
 		state = ServerFinderState.RESOLVING;
-		maxThreads = Integer.parseInt(maxThreadsBox.getText());
+		maxThreads = Integer.parseInt(maxThreadsBox.getValue());
+		ipBox.active = false;
+		maxThreadsBox.active = false;
+		searchButton.setMessage(Component.literal("Cancel"));
 		checked = 0;
 		working = 0;
 		
@@ -103,7 +108,7 @@ public class ServerFinderScreen extends Screen
 		try
 		{
 			InetAddress addr =
-				InetAddress.getByName(ipBox.getText().split(":")[0].trim());
+				InetAddress.getByName(ipBox.getValue().split(":")[0].trim());
 			
 			int[] ipParts = new int[4];
 			for(int i = 0; i < 4; i++)
@@ -155,108 +160,104 @@ public class ServerFinderScreen extends Screen
 		}
 	}
 	
-	@Override
-	public void tick()
-	{
-		searchButton
-			.setMessage(Text.literal(state.isRunning() ? "Cancel" : "Search"));
-		ipBox.active = !state.isRunning();
-		maxThreadsBox.active = !state.isRunning();
-		
-		searchButton.active = MathUtils.isInteger(maxThreadsBox.getText())
-			&& !ipBox.getText().isEmpty();
-	}
-	
-	private boolean isServerInList(String ip)
-	{
-		for(int i = 0; i < prevScreen.getServerList().size(); i++)
-			if(prevScreen.getServerList().get(i).address.equals(ip))
-				return true;
-			
-		return false;
-	}
-	
 	private void updatePingers(ArrayList<WurstServerPinger> pingers)
 	{
 		for(int i = 0; i < pingers.size(); i++)
-			if(!pingers.get(i).isStillPinging())
+		{
+			WurstServerPinger pinger = pingers.get(i);
+			if(pinger.isStillPinging())
+				continue;
+			
+			checked++;
+			if(pinger.isWorking())
 			{
-				checked++;
-				if(pingers.get(i).isWorking())
-				{
-					working++;
-					
-					if(!isServerInList(pingers.get(i).getServerIP()))
-					{
-						prevScreen.getServerList()
-							.add(new ServerInfo("Grief me #" + working,
-								pingers.get(i).getServerIP(), ServerType.OTHER),
-								false);
-						prevScreen.getServerList().saveFile();
-						((IMultiplayerScreen)prevScreen).getServerListSelector()
-							.setSelected(null);
-						((IMultiplayerScreen)prevScreen).getServerListSelector()
-							.setServers(prevScreen.getServerList());
-					}
-				}
-				pingers.remove(i);
-				i -= 1;
+				working++;
+				String name = "Grief me #" + working;
+				String ip = pinger.getServerIP();
+				addServerToList(name, ip);
 			}
+			
+			pingers.remove(i);
+			i--;
+		}
 	}
 	
-	@Override
-	public boolean keyPressed(int keyCode, int scanCode, int int_3)
+	// Basically what MultiplayerScreen.addEntry() does,
+	// but without changing the current screen.
+	private void addServerToList(String name, String ip)
 	{
-		if(keyCode == GLFW.GLFW_KEY_ENTER)
-			searchButton.onPress();
+		ServerList serverList = prevScreen.getServers();
+		if(serverList.get(ip) != null)
+			return;
 		
-		return super.keyPressed(keyCode, scanCode, int_3);
+		serverList.add(new ServerData(name, ip, Type.OTHER), false);
+		serverList.save();
+		
+		ServerSelectionList listWidget = prevScreen.serverSelectionList;
+		listWidget.setSelected(null);
+		listWidget.updateOnlineServers(serverList);
 	}
 	
 	@Override
-	public void render(DrawContext context, int mouseX, int mouseY,
+	public void tick()
+	{
+		searchButton.active = MathUtils.isInteger(maxThreadsBox.getValue())
+			&& !ipBox.getValue().isEmpty();
+	}
+	
+	@Override
+	public boolean mouseClicked(MouseButtonEvent context, boolean doubleClick)
+	{
+		if(context.button() == GLFW.GLFW_MOUSE_BUTTON_4)
+		{
+			onClose();
+			return true;
+		}
+		
+		return super.mouseClicked(context, doubleClick);
+	}
+	
+	@Override
+	public void render(GuiGraphics context, int mouseX, int mouseY,
 		float partialTicks)
 	{
-		renderBackground(context, mouseX, mouseY, partialTicks);
-		
-		context.drawCenteredTextWithShadow(textRenderer, "Server Finder",
-			width / 2, 20, 16777215);
-		context.drawCenteredTextWithShadow(textRenderer,
+		context.drawCenteredString(font, "Server Finder", width / 2, 20,
+			CommonColors.WHITE);
+		context.drawCenteredString(font,
 			"This will search for servers with similar IPs", width / 2, 40,
-			10526880);
-		context.drawCenteredTextWithShadow(textRenderer,
+			CommonColors.LIGHT_GRAY);
+		context.drawCenteredString(font,
 			"to the IP you type into the field below.", width / 2, 50,
-			10526880);
-		context.drawCenteredTextWithShadow(textRenderer,
+			CommonColors.LIGHT_GRAY);
+		context.drawCenteredString(font,
 			"The servers it finds will be added to your server list.",
-			width / 2, 60, 10526880);
+			width / 2, 60, CommonColors.LIGHT_GRAY);
 		
-		context.drawTextWithShadow(textRenderer, "Server address:",
-			width / 2 - 100, height / 4 + 24, 10526880);
+		context.drawString(font, "Server address:", width / 2 - 100,
+			height / 4 + 24, CommonColors.LIGHT_GRAY);
 		ipBox.render(context, mouseX, mouseY, partialTicks);
 		
-		context.drawTextWithShadow(textRenderer, "Max. threads:",
-			width / 2 - 100, height / 4 + 60, 10526880);
+		context.drawString(font, "Max. threads:", width / 2 - 100,
+			height / 4 + 60, CommonColors.LIGHT_GRAY);
 		maxThreadsBox.render(context, mouseX, mouseY, partialTicks);
 		
-		context.drawCenteredTextWithShadow(textRenderer, state.toString(),
-			width / 2, height / 4 + 73, 10526880);
+		context.drawCenteredString(font, state.toString(), width / 2,
+			height / 4 + 73, CommonColors.LIGHT_GRAY);
 		
-		context.drawTextWithShadow(textRenderer,
-			"Checked: " + checked + " / 1792", width / 2 - 100, height / 4 + 84,
-			10526880);
-		context.drawTextWithShadow(textRenderer, "Working: " + working,
-			width / 2 - 100, height / 4 + 94, 10526880);
+		context.drawString(font, "Checked: " + checked + " / 1792",
+			width / 2 - 100, height / 4 + 84, CommonColors.LIGHT_GRAY);
+		context.drawString(font, "Working: " + working, width / 2 - 100,
+			height / 4 + 94, CommonColors.LIGHT_GRAY);
 		
-		for(Drawable drawable : drawables)
+		for(Renderable drawable : renderables)
 			drawable.render(context, mouseX, mouseY, partialTicks);
 	}
 	
 	@Override
-	public void close()
+	public void onClose()
 	{
 		state = ServerFinderState.CANCELLED;
-		super.close();
+		minecraft.setScreen(prevScreen);
 	}
 	
 	enum ServerFinderState

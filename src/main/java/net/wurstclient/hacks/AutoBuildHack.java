@@ -9,22 +9,22 @@ package net.wurstclient.hacks;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.stream.Collectors;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
-import org.lwjgl.opengl.GL11;
+import com.mojang.blaze3d.vertex.PoseStack;
 
-import com.mojang.blaze3d.systems.RenderSystem;
-
-import net.minecraft.client.gl.ShaderProgramKeys;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 import net.wurstclient.Category;
 import net.wurstclient.events.RenderListener;
 import net.wurstclient.events.RightClickListener;
@@ -34,7 +34,6 @@ import net.wurstclient.settings.CheckboxSetting;
 import net.wurstclient.settings.FileSetting;
 import net.wurstclient.settings.SliderSetting;
 import net.wurstclient.settings.SliderSetting.ValueDisplay;
-import net.wurstclient.settings.SwingHandSetting.SwingHand;
 import net.wurstclient.util.*;
 import net.wurstclient.util.BlockPlacer.BlockPlacingParams;
 import net.wurstclient.util.json.JsonException;
@@ -42,6 +41,9 @@ import net.wurstclient.util.json.JsonException;
 public final class AutoBuildHack extends Hack
 	implements UpdateListener, RightClickListener, RenderListener
 {
+	private static final AABB BLOCK_BOX =
+		new AABB(1 / 16.0, 1 / 16.0, 1 / 16.0, 15 / 16.0, 15 / 16.0, 15 / 16.0);
+	
 	private final FileSetting templateSetting = new FileSetting("Template",
 		"Determines what to build.\n\n"
 			+ "Templates are just JSON files. Feel free to add your own or to edit / delete the default templates.\n\n"
@@ -58,18 +60,27 @@ public final class AutoBuildHack extends Hack
 		"Makes sure that you don't reach through walls when placing blocks. Can help with AntiCheat plugins but slows down building.",
 		false);
 	
-	private final CheckboxSetting instaBuild = new CheckboxSetting("InstaBuild",
-		"Builds small templates (<= 64 blocks) instantly.\n"
-			+ "For best results, stand close to the block you're placing.",
+	private final CheckboxSetting useSavedBlocks = new CheckboxSetting(
+		"Use saved blocks",
+		"Tries to place the same blocks that were saved in the template.\n\n"
+			+ "If the template does not specify block types, it will be built"
+			+ " from whatever block you are holding.",
 		true);
 	
 	private final CheckboxSetting fastPlace =
 		new CheckboxSetting("Always FastPlace",
 			"Builds as if FastPlace was enabled, even if it's not.", true);
 	
+	private final CheckboxSetting strictBuildOrder = new CheckboxSetting(
+		"Strict build order",
+		"Places blocks in exactly the same order that they appear in the"
+			+ " template. This is slower, but provides more consistent results.",
+		false);
+	
 	private Status status = Status.NO_TEMPLATE;
 	private AutoBuildTemplate template;
-	private LinkedHashSet<BlockPos> remainingBlocks = new LinkedHashSet<>();
+	private LinkedHashMap<BlockPos, Item> remainingBlocks =
+		new LinkedHashMap<>();
 	
 	public AutoBuildHack()
 	{
@@ -78,8 +89,9 @@ public final class AutoBuildHack extends Hack
 		addSetting(templateSetting);
 		addSetting(range);
 		addSetting(checkLOS);
-		addSetting(instaBuild);
+		addSetting(useSavedBlocks);
 		addSetting(fastPlace);
+		addSetting(strictBuildOrder);
 	}
 	
 	@Override
@@ -114,6 +126,7 @@ public final class AutoBuildHack extends Hack
 	@Override
 	protected void onEnable()
 	{
+		WURST.getHax().instaBuildHack.setEnabled(false);
 		WURST.getHax().templateToolHack.setEnabled(false);
 		
 		EVENTS.add(UpdateListener.class, this);
@@ -142,7 +155,7 @@ public final class AutoBuildHack extends Hack
 		if(status != Status.IDLE)
 			return;
 		
-		HitResult hitResult = MC.crosshairTarget;
+		HitResult hitResult = MC.hitResult;
 		if(hitResult == null || hitResult.getType() != HitResult.Type.BLOCK
 			|| !(hitResult instanceof BlockHitResult blockHitResult))
 			return;
@@ -151,14 +164,12 @@ public final class AutoBuildHack extends Hack
 		if(!BlockUtils.canBeClicked(hitResultPos))
 			return;
 		
-		BlockPos startPos = hitResultPos.offset(blockHitResult.getSide());
-		Direction direction = MC.player.getHorizontalFacing();
-		remainingBlocks = template.getPositions(startPos, direction);
+		BlockPos startPos =
+			hitResultPos.relative(blockHitResult.getDirection());
+		Direction direction = MC.player.getDirection();
+		remainingBlocks = template.getBlocksToPlace(startPos, direction);
 		
-		if(instaBuild.isChecked() && template.size() <= 64)
-			buildInstantly();
-		else
-			status = Status.BUILDING;
+		status = Status.BUILDING;
 	}
 	
 	@Override
@@ -185,60 +196,33 @@ public final class AutoBuildHack extends Hack
 	}
 	
 	@Override
-	public void onRender(MatrixStack matrixStack, float partialTicks)
+	public void onRender(PoseStack matrixStack, float partialTicks)
 	{
 		if(status != Status.BUILDING)
 			return;
 		
-		// GL settings
-		GL11.glEnable(GL11.GL_BLEND);
-		GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
-		GL11.glDisable(GL11.GL_CULL_FACE);
+		List<BlockPos> blocksToDraw = remainingBlocks.keySet().stream()
+			.filter(pos -> BlockUtils.getState(pos).canBeReplaced()).limit(1024)
+			.toList();
 		
-		matrixStack.push();
+		int black = 0x80000000;
+		List<AABB> outlineBoxes =
+			blocksToDraw.stream().map(pos -> BLOCK_BOX.move(pos)).toList();
+		RenderUtils.drawOutlinedBoxes(matrixStack, outlineBoxes, black, true);
 		
-		RegionPos region = RenderUtils.getCameraRegion();
-		RenderUtils.applyRegionalRenderOffset(matrixStack, region);
-		
-		RenderSystem.setShaderColor(0, 0, 0, 0.5F);
-		RenderSystem.setShader(ShaderProgramKeys.POSITION);
-		
-		double boxStart = 1 / 16.0;
-		double boxEnd = 15 / 16.0;
-		Box box = new Box(boxStart, boxStart, boxStart, boxEnd, boxEnd, boxEnd)
-			.offset(region.negate().toBlockPos());
-		
-		ArrayList<BlockPos> blocksToDraw = remainingBlocks.stream()
-			.filter(pos -> BlockUtils.getState(pos).isReplaceable()).limit(1024)
-			.collect(Collectors.toCollection(ArrayList::new));
-		
-		GL11.glDepthMask(false);
-		RenderSystem.setShaderColor(0, 1, 0, 0.15F);
-		
-		Vec3d eyesPos = RotationUtils.getEyesPos();
+		int green = 0x2600FF00;
+		Vec3 eyesPos = RotationUtils.getEyesPos();
 		double rangeSq = range.getValueSq();
-		blocksToDraw.stream()
-			.filter(pos -> pos.getSquaredDistance(eyesPos) <= rangeSq)
-			.map(pos -> box.offset(pos)).forEach(
-				offsetBox -> RenderUtils.drawSolidBox(offsetBox, matrixStack));
-		
-		GL11.glDepthMask(true);
-		RenderSystem.setShaderColor(0, 0, 0, 0.5F);
-		
-		blocksToDraw.stream().map(pos -> box.offset(pos)).forEach(
-			offsetBox -> RenderUtils.drawOutlinedBox(offsetBox, matrixStack));
-		
-		matrixStack.pop();
-		
-		// GL resets
-		GL11.glDisable(GL11.GL_BLEND);
-		RenderSystem.setShaderColor(1, 1, 1, 1);
+		List<AABB> greenBoxes = blocksToDraw.stream()
+			.filter(pos -> pos.distToCenterSqr(eyesPos) <= rangeSq)
+			.map(pos -> BLOCK_BOX.move(pos)).toList();
+		RenderUtils.drawSolidBoxes(matrixStack, greenBoxes, green, true);
 	}
 	
 	private void buildNormally()
 	{
-		remainingBlocks
-			.removeIf(pos -> !BlockUtils.getState(pos).isReplaceable());
+		remainingBlocks.keySet()
+			.removeIf(pos -> !BlockUtils.getState(pos).canBeReplaced());
 		
 		if(remainingBlocks.isEmpty())
 		{
@@ -246,44 +230,53 @@ public final class AutoBuildHack extends Hack
 			return;
 		}
 		
-		if(!fastPlace.isChecked() && MC.itemUseCooldown > 0)
+		if(!fastPlace.isChecked() && MC.rightClickDelay > 0)
 			return;
 		
 		double rangeSq = range.getValueSq();
-		for(BlockPos pos : remainingBlocks)
+		for(Map.Entry<BlockPos, Item> entry : remainingBlocks.entrySet())
 		{
-			BlockPlacingParams params = BlockPlacer.getBlockPlacingParams(pos);
-			if(params == null || params.distanceSq() > rangeSq)
-				continue;
-			if(checkLOS.isChecked() && !params.lineOfSight())
-				continue;
+			BlockPos pos = entry.getKey();
+			Item item = entry.getValue();
 			
-			MC.itemUseCooldown = 4;
+			BlockPlacingParams params = BlockPlacer.getBlockPlacingParams(pos);
+			if(params == null || params.distanceSq() > rangeSq
+				|| checkLOS.isChecked() && !params.lineOfSight())
+				if(strictBuildOrder.isChecked())
+					return;
+				else
+					continue;
+				
+			if(useSavedBlocks.isChecked() && item != Items.AIR
+				&& !MC.player.getMainHandItem().is(item))
+			{
+				giveOrSelectItem(item);
+				return;
+			}
+			
+			MC.rightClickDelay = 4;
 			RotationUtils.getNeededRotations(params.hitVec())
 				.sendPlayerLookPacket();
 			InteractionSimulator.rightClickBlock(params.toHitResult());
-			break;
+			return;
 		}
 	}
 	
-	private void buildInstantly()
+	private void giveOrSelectItem(Item item)
 	{
-		double rangeSq = range.getValueSq();
+		if(InventoryUtils.selectItem(item, 36, true))
+			return;
 		
-		for(BlockPos pos : remainingBlocks)
-		{
-			if(!BlockUtils.getState(pos).isReplaceable())
-				continue;
-			
-			BlockPlacingParams params = BlockPlacer.getBlockPlacingParams(pos);
-			if(params == null || params.distanceSq() > rangeSq)
-				continue;
-			
-			InteractionSimulator.rightClickBlock(params.toHitResult(),
-				SwingHand.OFF);
-		}
+		if(!MC.player.hasInfiniteMaterials())
+			return;
 		
-		remainingBlocks.clear();
+		Inventory inventory = MC.player.getInventory();
+		int slot = inventory.getFreeSlot();
+		if(slot < 0)
+			slot = inventory.getSelectedSlot();
+		
+		ItemStack stack = new ItemStack(item);
+		InventoryUtils.setCreativeStack(slot, stack);
 	}
 	
 	private void loadSelectedTemplate()

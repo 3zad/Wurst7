@@ -8,30 +8,34 @@
 package net.wurstclient.clickgui.screens;
 
 import java.util.List;
+import java.util.Objects;
 
 import org.lwjgl.glfw.GLFW;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.Drawable;
-import net.minecraft.client.gui.screen.ConfirmScreen;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.enchantment.Enchantment;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.registry.tag.EnchantmentTags;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.ObjectSelectionList;
+import net.minecraft.client.gui.components.Renderable;
+import net.minecraft.client.gui.screens.ConfirmScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.core.Holder;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.EnchantmentTags;
+import net.minecraft.util.CommonColors;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.enchantment.Enchantment;
 import net.wurstclient.hacks.autolibrarian.BookOffer;
 import net.wurstclient.settings.BookOffersSetting;
-import net.wurstclient.util.ListWidget;
 import net.wurstclient.util.RenderUtils;
+import net.wurstclient.util.WurstColors;
 
 public final class EditBookOffersScreen extends Screen
 {
@@ -39,13 +43,13 @@ public final class EditBookOffersScreen extends Screen
 	private final BookOffersSetting bookOffers;
 	
 	private ListGui listGui;
-	private ButtonWidget editButton;
-	private ButtonWidget removeButton;
-	private ButtonWidget doneButton;
+	private Button editButton;
+	private Button removeButton;
+	private Button doneButton;
 	
 	public EditBookOffersScreen(Screen prevScreen, BookOffersSetting bookOffers)
 	{
-		super(Text.literal(""));
+		super(Component.literal(""));
 		this.prevScreen = prevScreen;
 		this.bookOffers = bookOffers;
 	}
@@ -53,157 +57,111 @@ public final class EditBookOffersScreen extends Screen
 	@Override
 	public void init()
 	{
-		listGui = new ListGui(client, this, bookOffers.getOffers());
+		listGui = new ListGui(minecraft, this, bookOffers.getOffers());
+		addWidget(listGui);
 		
-		addDrawableChild(
-			ButtonWidget
-				.builder(Text.literal("Add"),
-					b -> client
-						.setScreen(new AddBookOfferScreen(this, bookOffers)))
-				.dimensions(width / 2 - 154, height - 56, 100, 20).build());
+		addRenderableWidget(Button
+			.builder(Component.literal("Add"),
+				b -> minecraft
+					.setScreen(new AddBookOfferScreen(this, bookOffers)))
+			.bounds(width / 2 - 154, height - 56, 100, 20).build());
 		
-		addDrawableChild(
-			editButton = ButtonWidget.builder(Text.literal("Edit"), b -> {
-				boolean selected = listGui.selected >= 0
-					&& listGui.selected < listGui.list.size();
-				if(!selected)
+		addRenderableWidget(
+			editButton = Button.builder(Component.literal("Edit"), b -> {
+				BookOffer selected = listGui.getSelectedOffer();
+				if(selected == null)
 					return;
 				
-				client.setScreen(new EditBookOfferScreen(this, bookOffers,
-					listGui.selected));
-			}).dimensions(width / 2 - 50, height - 56, 100, 20).build());
+				minecraft.setScreen(new EditBookOfferScreen(this, bookOffers,
+					bookOffers.indexOf(selected)));
+			}).bounds(width / 2 - 50, height - 56, 100, 20).build());
 		editButton.active = false;
 		
-		addDrawableChild(removeButton = ButtonWidget
-			.builder(Text.literal("Remove"),
-				b -> bookOffers.remove(listGui.selected))
-			.dimensions(width / 2 + 54, height - 56, 100, 20).build());
+		addRenderableWidget(
+			removeButton = Button.builder(Component.literal("Remove"), b -> {
+				bookOffers
+					.remove(bookOffers.indexOf(listGui.getSelectedOffer()));
+				minecraft.setScreen(EditBookOffersScreen.this);
+			}).bounds(width / 2 + 54, height - 56, 100, 20).build());
 		removeButton.active = false;
 		
-		addDrawableChild(ButtonWidget.builder(Text.literal("Reset to Defaults"),
-			b -> client.setScreen(new ConfirmScreen(b2 -> {
-				if(b2)
-					bookOffers.resetToDefaults();
-				client.setScreen(EditBookOffersScreen.this);
-			}, Text.literal("Reset to Defaults"),
-				Text.literal("Are you sure?"))))
-			.dimensions(width - 106, 6, 100, 20).build());
+		addRenderableWidget(
+			Button.builder(Component.literal("Reset to Defaults"),
+				b -> minecraft.setScreen(new ConfirmScreen(b2 -> {
+					if(b2)
+						bookOffers.resetToDefaults();
+					minecraft.setScreen(EditBookOffersScreen.this);
+				}, Component.literal("Reset to Defaults"),
+					Component.literal("Are you sure?"))))
+				.bounds(width - 106, 6, 100, 20).build());
 		
-		addDrawableChild(doneButton = ButtonWidget
-			.builder(Text.literal("Done"), b -> client.setScreen(prevScreen))
-			.dimensions(width / 2 - 100, height - 32, 200, 20).build());
+		addRenderableWidget(doneButton = Button
+			.builder(Component.literal("Done"),
+				b -> minecraft.setScreen(prevScreen))
+			.bounds(width / 2 - 100, height - 32, 200, 20).build());
 	}
 	
 	@Override
-	public boolean mouseClicked(double mouseX, double mouseY, int mouseButton)
+	public boolean mouseClicked(MouseButtonEvent context, boolean doubleClick)
 	{
-		boolean childClicked = super.mouseClicked(mouseX, mouseY, mouseButton);
+		boolean childClicked = super.mouseClicked(context, doubleClick);
 		
-		listGui.mouseClicked(mouseX, mouseY, mouseButton);
-		
-		if(!childClicked && mouseButton == 0 && (mouseX < (width - 220) / 2
-			|| mouseX > width / 2 + 129 || mouseY < 32 || mouseY > height - 64))
-			listGui.selected = -1;
-		
-		if(mouseButton == GLFW.GLFW_MOUSE_BUTTON_4)
-			doneButton.onPress();
+		if(context.button() == GLFW.GLFW_MOUSE_BUTTON_4)
+			doneButton.onPress(context);
 		
 		return childClicked;
 	}
 	
 	@Override
-	public boolean mouseDragged(double double_1, double double_2, int int_1,
-		double double_3, double double_4)
+	public boolean keyPressed(KeyEvent context)
 	{
-		listGui.mouseDragged(double_1, double_2, int_1, double_3, double_4);
-		return super.mouseDragged(double_1, double_2, int_1, double_3,
-			double_4);
-	}
-	
-	@Override
-	public boolean mouseReleased(double double_1, double double_2, int int_1)
-	{
-		listGui.mouseReleased(double_1, double_2, int_1);
-		return super.mouseReleased(double_1, double_2, int_1);
-	}
-	
-	@Override
-	public boolean mouseScrolled(double mouseX, double mouseY,
-		double horizontalAmount, double verticalAmount)
-	{
-		listGui.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
-		return super.mouseScrolled(mouseX, mouseY, horizontalAmount,
-			verticalAmount);
-	}
-	
-	@Override
-	public boolean keyPressed(int keyCode, int scanCode, int int_3)
-	{
-		switch(keyCode)
+		switch(context.key())
 		{
 			case GLFW.GLFW_KEY_ENTER:
 			if(editButton.active)
-				editButton.onPress();
+				editButton.onPress(context);
 			break;
 			
 			case GLFW.GLFW_KEY_DELETE:
-			removeButton.onPress();
+			removeButton.onPress(context);
 			break;
 			
 			case GLFW.GLFW_KEY_ESCAPE:
 			case GLFW.GLFW_KEY_BACKSPACE:
-			doneButton.onPress();
-			break;
-			
-			case GLFW.GLFW_KEY_UP:
-			listGui.selectItem(listGui.selected - 1, 0, 0, 0);
-			break;
-			
-			case GLFW.GLFW_KEY_DOWN:
-			listGui.selectItem(listGui.selected + 1, 0, 0, 0);
+			doneButton.onPress(context);
 			break;
 			
 			default:
 			break;
 		}
 		
-		return super.keyPressed(keyCode, scanCode, int_3);
+		return super.keyPressed(context);
 	}
 	
 	@Override
 	public void tick()
 	{
-		boolean selected =
-			listGui.selected >= 0 && listGui.selected < listGui.list.size();
-		
+		boolean selected = listGui.getSelected() != null;
 		editButton.active = selected;
 		removeButton.active = selected;
 	}
 	
 	@Override
-	public void render(DrawContext context, int mouseX, int mouseY,
+	public void render(GuiGraphics context, int mouseX, int mouseY,
 		float partialTicks)
 	{
-		MatrixStack matrixStack = context.getMatrices();
-		renderBackground(context, mouseX, mouseY, partialTicks);
-		
 		listGui.render(context, mouseX, mouseY, partialTicks);
 		
-		matrixStack.push();
-		matrixStack.translate(0, 0, 300);
+		context.drawCenteredString(minecraft.font,
+			bookOffers.getName() + " (" + bookOffers.getOffers().size() + ")",
+			width / 2, 12, CommonColors.WHITE);
 		
-		context.drawCenteredTextWithShadow(client.textRenderer,
-			bookOffers.getName() + " (" + listGui.getItemCount() + ")",
-			width / 2, 12, 0xffffff);
-		
-		for(Drawable drawable : drawables)
+		for(Renderable drawable : renderables)
 			drawable.render(context, mouseX, mouseY, partialTicks);
-		
-		matrixStack.pop();
 	}
 	
 	@Override
-	public boolean shouldPause()
+	public boolean isPauseScreen()
 	{
 		return false;
 	}
@@ -214,84 +172,82 @@ public final class EditBookOffersScreen extends Screen
 		return false;
 	}
 	
-	private static class ListGui extends ListWidget
+	private final class Entry
+		extends ObjectSelectionList.Entry<EditBookOffersScreen.Entry>
 	{
-		private final MinecraftClient mc;
-		private final List<BookOffer> list;
-		private int selected = -1;
+		private final BookOffer bookOffer;
 		
-		public ListGui(MinecraftClient mc, EditBookOffersScreen screen,
-			List<BookOffer> list)
+		public Entry(BookOffer bookOffer)
 		{
-			super(mc, screen.width, screen.height, 32, screen.height - 64, 30);
-			this.mc = mc;
-			this.list = list;
+			this.bookOffer = Objects.requireNonNull(bookOffer);
 		}
 		
 		@Override
-		protected int getItemCount()
+		public Component getNarration()
 		{
-			return list.size();
+			return Component.translatable("narrator.select",
+				"Book offer " + bookOffer.getEnchantmentNameWithLevel()
+					+ ", ID " + bookOffer.id() + ", " + getPriceText());
 		}
 		
 		@Override
-		protected boolean selectItem(int index, int int_2, double var3,
-			double var4)
+		public void renderContent(GuiGraphics context, int mouseX, int mouseY,
+			boolean hovered, float tickDelta)
 		{
-			if(index >= 0 && index < list.size())
-				selected = index;
+			int x = getContentX();
+			int y = getContentY();
 			
-			return true;
-		}
-		
-		@Override
-		protected boolean isSelectedItem(int index)
-		{
-			return index == selected;
-		}
-		
-		@Override
-		protected void renderBackground()
-		{
-			
-		}
-		
-		@Override
-		protected void renderItem(DrawContext context, int index, int x, int y,
-			int var4, int var5, int var6, float partialTicks)
-		{
-			MatrixStack matrixStack = context.getMatrices();
-			if(isSelectedItem(index))
-				drawSelectionOutline(matrixStack, x, y);
-			
-			Item item = Registries.ITEM.get(Identifier.of("enchanted_book"));
+			Item item = BuiltInRegistries.ITEM
+				.getValue(ResourceLocation.parse("enchanted_book"));
 			ItemStack stack = new ItemStack(item);
 			RenderUtils.drawItem(context, stack, x + 1, y + 1, true);
 			
-			TextRenderer tr = mc.textRenderer;
-			BookOffer bookOffer = list.get(index);
+			Font tr = minecraft.font;
 			String name = bookOffer.getEnchantmentNameWithLevel();
 			
-			RegistryEntry<Enchantment> enchantment =
+			Holder<Enchantment> enchantment =
 				bookOffer.getEnchantmentEntry().get();
-			int nameColor =
-				enchantment.isIn(EnchantmentTags.CURSE) ? 0xff5555 : 0xf0f0f0;
-			context.drawText(tr, name, x + 28, y, nameColor, false);
+			int nameColor = enchantment.is(EnchantmentTags.CURSE)
+				? WurstColors.LIGHT_RED : WurstColors.VERY_LIGHT_GRAY;
+			context.drawString(tr, name, x + 28, y, nameColor, false);
 			
-			context.drawText(tr, bookOffer.id(), x + 28, y + 9, 0xa0a0a0,
-				false);
+			context.drawString(tr, bookOffer.id(), x + 28, y + 9,
+				CommonColors.LIGHT_GRAY, false);
 			
-			String price;
-			if(bookOffer.price() >= 64)
-				price = "any price";
-			else
-			{
-				price = "max " + bookOffer.price();
+			String price = getPriceText();
+			context.drawString(tr, price, x + 28, y + 18,
+				CommonColors.LIGHT_GRAY, false);
+			
+			if(bookOffer.price() < 64)
 				RenderUtils.drawItem(context, new ItemStack(Items.EMERALD),
-					x + 28 + tr.getWidth(price), y + 16, false);
-			}
+					x + 28 + tr.width(price), y + 16, false);
+		}
+		
+		private String getPriceText()
+		{
+			if(bookOffer.price() >= 64)
+				return "any price";
 			
-			context.drawText(tr, price, x + 28, y + 18, 0xa0a0a0, false);
+			return "max " + bookOffer.price();
+		}
+	}
+	
+	private final class ListGui
+		extends ObjectSelectionList<EditBookOffersScreen.Entry>
+	{
+		public ListGui(Minecraft minecraft, EditBookOffersScreen screen,
+			List<BookOffer> list)
+		{
+			super(minecraft, screen.width, screen.height - 108, 36, 30);
+			
+			list.stream().map(EditBookOffersScreen.Entry::new)
+				.forEach(this::addEntry);
+		}
+		
+		public BookOffer getSelectedOffer()
+		{
+			EditBookOffersScreen.Entry entry = getSelected();
+			return entry != null ? entry.bookOffer : null;
 		}
 	}
 }

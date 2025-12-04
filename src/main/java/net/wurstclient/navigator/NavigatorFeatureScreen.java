@@ -15,27 +15,20 @@ import java.util.HashMap;
 import java.util.Set;
 import java.util.TreeMap;
 
-import org.joml.Matrix4f;
+import org.joml.Matrix3x2fStack;
 import org.lwjgl.glfw.GLFW;
-import org.lwjgl.opengl.GL11;
-
-import com.mojang.blaze3d.systems.RenderSystem;
 
 import net.fabricmc.fabric.api.client.screen.v1.Screens;
-import net.minecraft.client.gl.ShaderProgramKeys;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.ClickableWidget;
-import net.minecraft.client.render.BufferBuilder;
-import net.minecraft.client.render.BufferRenderer;
-import net.minecraft.client.render.Tessellator;
-import net.minecraft.client.render.VertexFormat;
-import net.minecraft.client.render.VertexFormats;
-import net.minecraft.client.sound.PositionedSoundInstance;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.sound.SoundEvents;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.MathHelper;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.input.MouseButtonInfo;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.util.CommonColors;
+import net.minecraft.util.Mth;
 import net.wurstclient.Feature;
 import net.wurstclient.WurstClient;
 import net.wurstclient.clickgui.ClickGui;
@@ -49,13 +42,14 @@ import net.wurstclient.keybinds.PossibleKeybind;
 import net.wurstclient.settings.Setting;
 import net.wurstclient.util.ChatUtils;
 import net.wurstclient.util.RenderUtils;
+import net.wurstclient.util.WurstColors;
 
 public final class NavigatorFeatureScreen extends NavigatorScreen
 {
 	private Feature feature;
 	private NavigatorMainScreen parent;
 	private ButtonData activeButton;
-	private ButtonWidget primaryButton;
+	private Button primaryButton;
 	private String text;
 	private ArrayList<ButtonData> buttonDatas = new ArrayList<>();
 	
@@ -89,11 +83,11 @@ public final class NavigatorFeatureScreen extends NavigatorScreen
 		// primary button
 		String primaryAction = feature.getPrimaryAction();
 		boolean hasPrimaryAction = !primaryAction.isEmpty();
-		boolean hasHelp = false;// !feature.getHelpPage().isEmpty();
 		if(hasPrimaryAction)
 		{
-			primaryButton =
-				ButtonWidget.builder(Text.literal(primaryAction), b -> {
+			primaryButton = Button.builder(
+				net.minecraft.network.chat.Component.literal(primaryAction),
+				b -> {
 					TooManyHaxHack tooManyHax =
 						WurstClient.INSTANCE.getHax().tooManyHaxHack;
 					if(tooManyHax.isEnabled() && tooManyHax.isBlocked(feature))
@@ -106,26 +100,13 @@ public final class NavigatorFeatureScreen extends NavigatorScreen
 					feature.doPrimaryAction();
 					
 					primaryButton
-						.setMessage(Text.literal(feature.getPrimaryAction()));
+						.setMessage(net.minecraft.network.chat.Component
+							.literal(feature.getPrimaryAction()));
 					WurstClient.INSTANCE.getNavigator()
 						.addPreference(feature.getName());
-				}).dimensions(width / 2 - 151, height - 65, hasHelp ? 149 : 302,
-					18).build();
-			addDrawableChild(primaryButton);
+				}).bounds(width / 2 - 151, height - 65, 302, 18).build();
+			addRenderableWidget(primaryButton);
 		}
-		
-		// help button
-		// if(hasHelp)
-		// method_37063(new ButtonWidget(
-		// width / 2 + (hasPrimaryAction ? 2 : -151), height - 65,
-		// hasPrimaryAction ? 149 : 302, 20, "Help", b -> {
-		// MiscUtils.openLink("https://www.wurstclient.net/wiki/"
-		// + feature.getHelpPage() + "/");
-		// wurst.navigator.analytics.trackEvent("help", "open",
-		// feature.getName());
-		// wurst.navigator.addPreference(feature.getName());
-		// ConfigFiles.NAVIGATOR.save();
-		// }));
 		
 		// type
 		text = "Type: ";
@@ -237,7 +218,7 @@ public final class NavigatorFeatureScreen extends NavigatorScreen
 					public void press()
 					{
 						// remove keybind
-						client.setScreen(new NavigatorRemoveKeybindScreen(
+						minecraft.setScreen(new NavigatorRemoveKeybindScreen(
 							existingKeybinds, NavigatorFeatureScreen.this));
 					}
 				});
@@ -250,16 +231,22 @@ public final class NavigatorFeatureScreen extends NavigatorScreen
 	}
 	
 	@Override
-	protected void onKeyPress(int keyCode, int scanCode, int int_3)
+	protected void onKeyPress(KeyEvent context)
 	{
+		int keyCode = context.key();
+		
 		if(keyCode == GLFW.GLFW_KEY_ESCAPE
 			|| keyCode == GLFW.GLFW_KEY_BACKSPACE)
 			goBack();
 	}
 	
 	@Override
-	protected void onMouseClick(double x, double y, int button)
+	protected void onMouseClick(MouseButtonEvent context)
 	{
+		double x = context.x();
+		double y = context.y();
+		int button = context.button();
+		
 		// popups
 		if(WurstClient.INSTANCE.getGui().handleNavigatorPopupClick(x, y,
 			button))
@@ -281,8 +268,8 @@ public final class NavigatorFeatureScreen extends NavigatorScreen
 		// buttons
 		if(activeButton != null)
 		{
-			client.getSoundManager().play(
-				PositionedSoundInstance.master(SoundEvents.UI_BUTTON_CLICK, 1));
+			minecraft.getSoundManager().play(
+				SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1));
 			activeButton.press();
 			WurstClient.INSTANCE.getNavigator()
 				.addPreference(feature.getName());
@@ -292,13 +279,13 @@ public final class NavigatorFeatureScreen extends NavigatorScreen
 		// component settings
 		WurstClient.INSTANCE.getGui().handleNavigatorMouseClick(
 			x - middleX + 154, y - 60 - scroll - windowComponentY, button,
-			window);
+			window, context);
 	}
 	
 	private void goBack()
 	{
 		parent.setExpanding(false);
-		client.setScreen(parent);
+		minecraft.setScreen(parent);
 	}
 	
 	@Override
@@ -318,21 +305,21 @@ public final class NavigatorFeatureScreen extends NavigatorScreen
 	protected void onUpdate()
 	{
 		if(primaryButton != null)
-			primaryButton.setMessage(Text.literal(feature.getPrimaryAction()));
+			primaryButton.setMessage(net.minecraft.network.chat.Component
+				.literal(feature.getPrimaryAction()));
 	}
 	
 	@Override
-	protected void onRender(DrawContext context, int mouseX, int mouseY,
+	protected void onRender(GuiGraphics context, int mouseX, int mouseY,
 		float partialTicks)
 	{
-		MatrixStack matrixStack = context.getMatrices();
+		Matrix3x2fStack matrixStack = context.pose();
 		ClickGui gui = WurstClient.INSTANCE.getGui();
 		int txtColor = gui.getTxtColor();
 		
 		// title bar
-		context.drawCenteredTextWithShadow(client.textRenderer,
-			feature.getName(), middleX, 32, txtColor);
-		GL11.glEnable(GL11.GL_BLEND);
+		context.drawCenteredString(minecraft.font, feature.getName(), middleX,
+			32, txtColor);
 		
 		// background
 		int bgx1 = middleX - 154;
@@ -345,22 +332,21 @@ public final class NavigatorFeatureScreen extends NavigatorScreen
 		int windowY1 = bgy1 + scroll + windowComponentY;
 		int windowY2 = windowY1 + window.getInnerHeight();
 		
-		setColorToBackground();
-		drawQuads(matrixStack, bgx1, bgy1, bgx2,
-			MathHelper.clamp(windowY1, bgy1, bgy3));
-		drawQuads(matrixStack, bgx1, MathHelper.clamp(windowY2, bgy1, bgy3),
-			bgx2, bgy2);
-		drawBoxShadow(matrixStack, bgx1, bgy1, bgx2, bgy2);
+		context.fill(bgx1, bgy1, bgx2, Mth.clamp(windowY1, bgy1, bgy3),
+			getBackgroundColor());
+		context.fill(bgx1, Mth.clamp(windowY2, bgy1, bgy3), bgx2, bgy2,
+			getBackgroundColor());
+		RenderUtils.drawBoxShadow2D(context, bgx1, bgy1, bgx2, bgy2);
 		
-		RenderUtils.enableScissor(context, bgx1, bgy1, bgx2, bgy3);
+		context.enableScissor(bgx1, bgy1, bgx2, bgy3);
 		
 		// settings
 		gui.setTooltip("");
 		window.validate();
 		
 		window.setY(windowY1 - 13);
-		matrixStack.push();
-		matrixStack.translate(bgx1, windowY1, 0);
+		matrixStack.pushMatrix();
+		matrixStack.translate(bgx1, windowY1);
 		
 		{
 			int x1 = 0;
@@ -371,28 +357,11 @@ public final class NavigatorFeatureScreen extends NavigatorScreen
 			int x3 = x1 + 2;
 			int x5 = x2 - 2;
 			
-			Matrix4f matrix = matrixStack.peek().getPositionMatrix();
-			Tessellator tessellator = RenderSystem.renderThreadTesselator();
-			RenderSystem.setShader(ShaderProgramKeys.POSITION);
-			
 			// window background
 			// left & right
-			setColorToBackground();
-			BufferBuilder bufferBuilder = tessellator
-				.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION);
-			bufferBuilder.vertex(matrix, x1, y3, 0);
-			bufferBuilder.vertex(matrix, x1, y2, 0);
-			bufferBuilder.vertex(matrix, x3, y2, 0);
-			bufferBuilder.vertex(matrix, x3, y3, 0);
-			bufferBuilder.vertex(matrix, x5, y3, 0);
-			bufferBuilder.vertex(matrix, x5, y2, 0);
-			bufferBuilder.vertex(matrix, x2, y2, 0);
-			bufferBuilder.vertex(matrix, x2, y3, 0);
-			BufferRenderer.drawWithGlobalProgram(bufferBuilder.end());
-			
-			setColorToBackground();
-			bufferBuilder = tessellator.begin(VertexFormat.DrawMode.QUADS,
-				VertexFormats.POSITION);
+			int bgColor = getBackgroundColor();
+			context.fill(x1, y3, x3, y2, bgColor);
+			context.fill(x5, y3, x2, y2, bgColor);
 			
 			// window background
 			// between children
@@ -407,10 +376,7 @@ public final class NavigatorFeatureScreen extends NavigatorScreen
 				if(yc2 > bgy3 - windowY1)
 					break;
 				
-				bufferBuilder.vertex(matrix, xc1, yc2, 0);
-				bufferBuilder.vertex(matrix, xc1, yc1, 0);
-				bufferBuilder.vertex(matrix, xc2, yc1, 0);
-				bufferBuilder.vertex(matrix, xc2, yc2, 0);
+				context.fill(xc1, yc1, xc2, yc2, bgColor);
 			}
 			
 			// window background
@@ -425,12 +391,7 @@ public final class NavigatorFeatureScreen extends NavigatorScreen
 				yc1 = lastChild.getY() + lastChild.getHeight();
 			}
 			int yc2 = yc1 + 2;
-			bufferBuilder.vertex(matrix, xc1, yc2, 0);
-			bufferBuilder.vertex(matrix, xc1, yc1, 0);
-			bufferBuilder.vertex(matrix, xc2, yc1, 0);
-			bufferBuilder.vertex(matrix, xc2, yc2, 0);
-			
-			BufferRenderer.drawWithGlobalProgram(bufferBuilder.end());
+			context.fill(xc1, yc1, xc2, yc2, bgColor);
 		}
 		
 		for(int i = 0; i < window.countChildren(); i++)
@@ -444,7 +405,7 @@ public final class NavigatorFeatureScreen extends NavigatorScreen
 			child.render(context, mouseX - bgx1, mouseY - windowY1,
 				partialTicks);
 		}
-		matrixStack.pop();
+		matrixStack.popMatrix();
 		
 		// buttons
 		activeButton = null;
@@ -468,34 +429,33 @@ public final class NavigatorFeatureScreen extends NavigatorScreen
 			}else
 				alpha = 0.375F;
 			float[] rgb = buttonData.color.getColorComponents(null);
-			RenderUtils.setShaderColor(rgb, alpha);
 			
 			// button
-			drawBox(matrixStack, x1, y1, x2, y2);
+			drawBox(context, x1, y1, x2, y2,
+				RenderUtils.toIntColor(rgb, alpha));
 			
 			// text
-			context.drawCenteredTextWithShadow(client.textRenderer,
-				buttonData.buttonText, (x1 + x2) / 2,
-				y1 + (buttonData.height - 10) / 2 + 1,
-				buttonData.isLocked() ? 0xaaaaaa : buttonData.textColor);
-			GL11.glEnable(GL11.GL_BLEND);
+			context.guiRenderState.up();
+			context.drawCenteredString(minecraft.font, buttonData.buttonText,
+				(x1 + x2) / 2, y1 + (buttonData.height - 10) / 2 + 1,
+				buttonData.isLocked() ? WurstColors.VERY_LIGHT_GRAY
+					: buttonData.textColor);
 		}
 		
 		// text
-		RenderSystem.setShaderColor(1, 1, 1, 1);
 		int textY = bgy1 + scroll + 2;
+		context.guiRenderState.up();
 		for(String line : text.split("\n"))
 		{
-			context.drawText(client.textRenderer, line, bgx1 + 2, textY,
-				txtColor, false);
-			textY += client.textRenderer.fontHeight;
+			context.drawString(minecraft.font, line, bgx1 + 2, textY, txtColor,
+				false);
+			textY += minecraft.font.lineHeight;
 		}
-		GL11.glEnable(GL11.GL_BLEND);
 		
-		RenderUtils.disableScissor(context);
+		context.disableScissor();
 		
 		// buttons below scissor box
-		for(ClickableWidget button : Screens.getButtons(this))
+		for(AbstractWidget button : Screens.getButtons(this))
 		{
 			// positions
 			int x1 = button.getX();
@@ -506,44 +466,34 @@ public final class NavigatorFeatureScreen extends NavigatorScreen
 			// color
 			boolean hovering =
 				mouseX >= x1 && mouseX <= x2 && mouseY >= y1 && mouseY <= y2;
+			int buttonColor;
 			if(feature.isEnabled() && button == primaryButton)
-				// if(feature.isBlocked())
-				// RenderSystem.setShaderColor(hovering ? 1F : 0.875F, 0F, 0F,
-				// 0.25F);
-				// else
-				RenderSystem.setShaderColor(0F, hovering ? 1F : 0.875F, 0F,
-					0.25F);
-			else if(hovering)
-				RenderSystem.setShaderColor(0.375F, 0.375F, 0.375F, 0.25F);
+				buttonColor = hovering ? 0x4000FF00 : 0x4000E000;
 			else
-				RenderSystem.setShaderColor(0.25F, 0.25F, 0.25F, 0.25F);
+				buttonColor = hovering ? 0x40606060 : 0x40404040;
 			
 			// button
-			drawBox(matrixStack, x1, y1, x2, y2);
+			drawBox(context, x1, y1, x2, y2, buttonColor);
 			
 			// text
 			String buttonText = button.getMessage().getString();
-			context.drawText(client.textRenderer, buttonText,
-				(x1 + x2 - client.textRenderer.getWidth(buttonText)) / 2,
-				y1 + 5, txtColor, false);
-			GL11.glEnable(GL11.GL_BLEND);
+			context.guiRenderState.up();
+			context.drawString(minecraft.font, buttonText,
+				(x1 + x2 - minecraft.font.width(buttonText)) / 2, y1 + 5,
+				txtColor, false);
 		}
 		
 		// popups & tooltip
 		gui.renderPopups(context, mouseX, mouseY);
 		gui.renderTooltip(context, mouseX, mouseY);
-		
-		// GL resets
-		GL11.glEnable(GL11.GL_CULL_FACE);
-		GL11.glDisable(GL11.GL_BLEND);
 	}
 	
 	@Override
-	public void close()
+	public void onClose()
 	{
 		window.close();
-		WurstClient.INSTANCE.getGui().handleMouseClick(Integer.MIN_VALUE,
-			Integer.MIN_VALUE, 0);
+		WurstClient.INSTANCE.getGui().handleMouseClick(new MouseButtonEvent(
+			Double.MIN_VALUE, Double.MIN_VALUE, new MouseButtonInfo(0, 0)));
 	}
 	
 	public Feature getFeature()
@@ -570,7 +520,7 @@ public final class NavigatorFeatureScreen extends NavigatorScreen
 	{
 		public String buttonText;
 		public Color color;
-		public int textColor = 0xffffff;
+		public int textColor = CommonColors.WHITE;
 		
 		public ButtonData(int x, int y, int width, int height,
 			String buttonText, int color)

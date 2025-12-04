@@ -7,176 +7,152 @@
  */
 package net.wurstclient.options;
 
+import java.util.Objects;
+
 import org.lwjgl.glfw.GLFW;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.Drawable;
-import net.minecraft.client.gui.screen.ConfirmScreen;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.text.Text;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.ObjectSelectionList;
+import net.minecraft.client.gui.components.Renderable;
+import net.minecraft.client.gui.screens.ConfirmScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.util.CommonColors;
 import net.wurstclient.WurstClient;
 import net.wurstclient.keybinds.Keybind;
 import net.wurstclient.keybinds.KeybindList;
-import net.wurstclient.util.ListWidget;
+import net.wurstclient.util.WurstColors;
 
 public final class KeybindManagerScreen extends Screen
 {
 	private final Screen prevScreen;
 	
 	private ListGui listGui;
-	private ButtonWidget addButton;
-	private ButtonWidget editButton;
-	private ButtonWidget removeButton;
-	private ButtonWidget backButton;
+	private Button addButton;
+	private Button editButton;
+	private Button removeButton;
+	private Button backButton;
 	
 	public KeybindManagerScreen(Screen prevScreen)
 	{
-		super(Text.literal(""));
+		super(Component.literal(""));
 		this.prevScreen = prevScreen;
 	}
 	
 	@Override
 	public void init()
 	{
-		listGui = new ListGui(client, width, height, 36, height - 56, 30);
+		listGui = new ListGui(minecraft, this);
+		addWidget(listGui);
 		
-		addDrawableChild(addButton = ButtonWidget
-			.builder(Text.literal("Add"),
-				b -> client.setScreen(new KeybindEditorScreen(this)))
-			.dimensions(width / 2 - 102, height - 52, 100, 20).build());
+		addRenderableWidget(addButton = Button
+			.builder(Component.literal("Add"),
+				b -> minecraft.setScreen(new KeybindEditorScreen(this)))
+			.bounds(width / 2 - 102, height - 52, 100, 20).build());
 		
-		addDrawableChild(
-			editButton = ButtonWidget.builder(Text.literal("Edit"), b -> edit())
-				.dimensions(width / 2 + 2, height - 52, 100, 20).build());
+		addRenderableWidget(
+			editButton = Button.builder(Component.literal("Edit"), b -> edit())
+				.bounds(width / 2 + 2, height - 52, 100, 20).build());
 		
-		addDrawableChild(removeButton =
-			ButtonWidget.builder(Text.literal("Remove"), b -> remove())
-				.dimensions(width / 2 - 102, height - 28, 100, 20).build());
+		addRenderableWidget(removeButton =
+			Button.builder(Component.literal("Remove"), b -> remove())
+				.bounds(width / 2 - 102, height - 28, 100, 20).build());
 		
-		addDrawableChild(backButton = ButtonWidget
-			.builder(Text.literal("Back"), b -> client.setScreen(prevScreen))
-			.dimensions(width / 2 + 2, height - 28, 100, 20).build());
+		addRenderableWidget(backButton = Button
+			.builder(Component.literal("Back"),
+				b -> minecraft.setScreen(prevScreen))
+			.bounds(width / 2 + 2, height - 28, 100, 20).build());
 		
-		addDrawableChild(ButtonWidget.builder(Text.literal("Reset Keybinds"),
-			b -> client.setScreen(new ConfirmScreen(confirmed -> {
+		addRenderableWidget(Button.builder(Component.literal("Reset Keybinds"),
+			b -> minecraft.setScreen(new ConfirmScreen(confirmed -> {
 				if(confirmed)
 					WurstClient.INSTANCE.getKeybinds()
 						.setKeybinds(KeybindList.DEFAULT_KEYBINDS);
-				client.setScreen(this);
-			}, Text.literal("Are you sure you want to reset your keybinds?"),
-				Text.literal("This cannot be undone!"))))
-			.dimensions(8, 8, 100, 20).build());
+				minecraft.setScreen(this);
+			}, Component
+				.literal("Are you sure you want to reset your keybinds?"),
+				Component.literal("This cannot be undone!"))))
+			.bounds(8, 8, 100, 20).build());
 		
-		addDrawableChild(ButtonWidget
-			.builder(Text.literal("Profiles..."),
-				b -> client.setScreen(new KeybindProfilesScreen(this)))
-			.dimensions(width - 108, 8, 100, 20).build());
+		addRenderableWidget(Button
+			.builder(Component.literal("Profiles..."),
+				b -> minecraft.setScreen(new KeybindProfilesScreen(this)))
+			.bounds(width - 108, 8, 100, 20).build());
 	}
 	
 	private void edit()
 	{
-		Keybind keybind = WurstClient.INSTANCE.getKeybinds().getAllKeybinds()
-			.get(listGui.selected);
-		client.setScreen(new KeybindEditorScreen(this, keybind.getKey(),
+		Keybind keybind = listGui.getSelectedKeybind();
+		if(keybind == null)
+			return;
+		
+		minecraft.setScreen(new KeybindEditorScreen(this, keybind.getKey(),
 			keybind.getCommands()));
 	}
 	
 	private void remove()
 	{
-		Keybind keybind1 = WurstClient.INSTANCE.getKeybinds().getAllKeybinds()
-			.get(listGui.selected);
-		WurstClient.INSTANCE.getKeybinds().remove(keybind1.getKey());
-	}
-	
-	@Override
-	public boolean mouseClicked(double mouseX, double mouseY, int mouseButton)
-	{
-		boolean childClicked = super.mouseClicked(mouseX, mouseY, mouseButton);
+		Keybind keybind = listGui.getSelectedKeybind();
+		if(keybind == null)
+			return;
 		
-		listGui.mouseClicked(mouseX, mouseY, mouseButton);
-		
-		if(!childClicked)
-			if(mouseY >= 36 && mouseY <= height - 57)
-				if(mouseX >= width / 2 + 140 || mouseX <= width / 2 - 126)
-					listGui.selected = -1;
-				
-		return childClicked;
+		WurstClient.INSTANCE.getKeybinds().remove(keybind.getKey());
+		minecraft.setScreen(this);
 	}
 	
 	@Override
-	public boolean mouseDragged(double double_1, double double_2, int int_1,
-		double double_3, double double_4)
+	public boolean keyPressed(KeyEvent context)
 	{
-		listGui.mouseDragged(double_1, double_2, int_1, double_3, double_4);
-		return super.mouseDragged(double_1, double_2, int_1, double_3,
-			double_4);
-	}
-	
-	@Override
-	public boolean mouseReleased(double double_1, double double_2, int int_1)
-	{
-		listGui.mouseReleased(double_1, double_2, int_1);
-		return super.mouseReleased(double_1, double_2, int_1);
-	}
-	
-	@Override
-	public boolean mouseScrolled(double mouseX, double mouseY,
-		double horizontalAmount, double verticalAmount)
-	{
-		listGui.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
-		return super.mouseScrolled(mouseX, mouseY, horizontalAmount,
-			verticalAmount);
-	}
-	
-	@Override
-	public boolean keyPressed(int keyCode, int scanCode, int int_3)
-	{
-		switch(keyCode)
+		switch(context.key())
 		{
 			case GLFW.GLFW_KEY_ENTER:
 			if(editButton.active)
-				editButton.onPress();
+				editButton.onPress(context);
 			else
-				addButton.onPress();
+				addButton.onPress(context);
 			break;
+			
 			case GLFW.GLFW_KEY_DELETE:
-			removeButton.onPress();
+			removeButton.onPress(context);
 			break;
+			
 			case GLFW.GLFW_KEY_ESCAPE:
-			backButton.onPress();
+			backButton.onPress(context);
 			break;
+			
 			default:
 			break;
 		}
 		
-		return super.keyPressed(keyCode, scanCode, int_3);
+		return super.keyPressed(context);
 	}
 	
 	@Override
 	public void tick()
 	{
-		boolean inBounds =
-			listGui.selected > -1 && listGui.selected < listGui.getItemCount();
-		
-		editButton.active = inBounds;
-		removeButton.active = inBounds;
+		boolean selected = listGui.getSelected() != null;
+		editButton.active = selected;
+		removeButton.active = selected;
 	}
 	
 	@Override
-	public void render(DrawContext context, int mouseX, int mouseY,
+	public void render(GuiGraphics context, int mouseX, int mouseY,
 		float partialTicks)
 	{
-		renderBackground(context, mouseX, mouseY, partialTicks);
 		listGui.render(context, mouseX, mouseY, partialTicks);
 		
-		context.drawCenteredTextWithShadow(textRenderer, "Keybind Manager",
-			width / 2, 8, 0xffffff);
-		context.drawCenteredTextWithShadow(textRenderer,
-			"Keybinds: " + listGui.getItemCount(), width / 2, 20, 0xffffff);
+		context.drawCenteredString(font, "Keybind Manager", width / 2, 8,
+			CommonColors.WHITE);
 		
-		for(Drawable drawable : drawables)
+		int count = WurstClient.INSTANCE.getKeybinds().getAllKeybinds().size();
+		context.drawCenteredString(font, "Keybinds: " + count, width / 2, 20,
+			CommonColors.WHITE);
+		
+		for(Renderable drawable : renderables)
 			drawable.render(context, mouseX, mouseY, partialTicks);
 	}
 	
@@ -186,57 +162,58 @@ public final class KeybindManagerScreen extends Screen
 		return false;
 	}
 	
-	private static final class ListGui extends ListWidget
+	private final class Entry
+		extends ObjectSelectionList.Entry<KeybindManagerScreen.Entry>
 	{
-		private int selected = -1;
+		private final Keybind keybind;
 		
-		public ListGui(MinecraftClient mc, int width, int height, int top,
-			int bottom, int slotHeight)
+		public Entry(Keybind keybind)
 		{
-			super(mc, width, height, top, bottom, slotHeight);
+			this.keybind = Objects.requireNonNull(keybind);
 		}
 		
 		@Override
-		protected boolean isSelectedItem(int index)
+		public Component getNarration()
 		{
-			return selected == index;
+			return Component.translatable("narrator.select",
+				"Keybind " + keybind);
 		}
 		
 		@Override
-		protected int getItemCount()
+		public void renderContent(GuiGraphics context, int mouseX, int mouseY,
+			boolean hovered, float tickDelta)
 		{
-			return WurstClient.INSTANCE.getKeybinds().getAllKeybinds().size();
-		}
-		
-		@Override
-		protected boolean selectItem(int index, int int_2, double var3,
-			double var4)
-		{
-			if(index >= 0 && index < getItemCount())
-				selected = index;
+			int x = getContentX();
+			int y = getContentY();
 			
-			return true;
+			Font tr = minecraft.font;
+			
+			String keyText =
+				"Key: " + keybind.getKey().replace("key.keyboard.", "");
+			context.drawString(tr, keyText, x + 3, y + 3,
+				WurstColors.VERY_LIGHT_GRAY, false);
+			
+			String cmdText = "Commands: " + keybind.getCommands();
+			context.drawString(tr, cmdText, x + 3, y + 15,
+				CommonColors.LIGHT_GRAY, false);
+		}
+	}
+	
+	private final class ListGui
+		extends ObjectSelectionList<KeybindManagerScreen.Entry>
+	{
+		public ListGui(Minecraft mc, KeybindManagerScreen screen)
+		{
+			super(mc, screen.width, screen.height - 96, 36, 30);
+			
+			WurstClient.INSTANCE.getKeybinds().getAllKeybinds().stream()
+				.map(KeybindManagerScreen.Entry::new).forEach(this::addEntry);
 		}
 		
-		@Override
-		protected void renderBackground()
+		public Keybind getSelectedKeybind()
 		{
-			
-		}
-		
-		@Override
-		protected void renderItem(DrawContext context, int index, int x, int y,
-			int slotHeight, int mouseX, int mouseY, float partialTicks)
-		{
-			Keybind keybind =
-				WurstClient.INSTANCE.getKeybinds().getAllKeybinds().get(index);
-			
-			context.drawText(client.textRenderer,
-				"Key: " + keybind.getKey().replace("key.keyboard.", ""), x + 3,
-				y + 3, 0xa0a0a0, false);
-			context.drawText(client.textRenderer,
-				"Commands: " + keybind.getCommands(), x + 3, y + 15, 0xa0a0a0,
-				false);
+			KeybindManagerScreen.Entry selected = getSelected();
+			return selected != null ? selected.keybind : null;
 		}
 	}
 }

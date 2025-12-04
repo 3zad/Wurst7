@@ -9,22 +9,25 @@ package net.wurstclient.options;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
 import org.lwjgl.glfw.GLFW;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.Drawable;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.text.Text;
-import net.minecraft.util.Util;
+import net.minecraft.Util;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.ObjectSelectionList;
+import net.minecraft.client.gui.components.Renderable;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.util.CommonColors;
 import net.wurstclient.WurstClient;
-import net.wurstclient.util.ListWidget;
+import net.wurstclient.util.WurstColors;
 import net.wurstclient.util.json.JsonException;
 
 public final class KeybindProfilesScreen extends Screen
@@ -32,42 +35,44 @@ public final class KeybindProfilesScreen extends Screen
 	private final Screen prevScreen;
 	
 	private ListGui listGui;
-	private ButtonWidget loadButton;
+	private Button loadButton;
 	
 	public KeybindProfilesScreen(Screen prevScreen)
 	{
-		super(Text.literal(""));
+		super(Component.literal(""));
 		this.prevScreen = prevScreen;
 	}
 	
 	@Override
 	public void init()
 	{
-		listGui = new ListGui(client, this,
+		listGui = new ListGui(minecraft, this,
 			WurstClient.INSTANCE.getKeybinds().listProfiles());
+		addWidget(listGui);
 		
-		addDrawableChild(
-			ButtonWidget.builder(Text.literal("Open Folder"), b -> openFolder())
-				.dimensions(8, 8, 100, 20).build());
+		addRenderableWidget(
+			Button.builder(Component.literal("Open Folder"), b -> openFolder())
+				.bounds(8, 8, 100, 20).build());
 		
-		addDrawableChild(ButtonWidget
-			.builder(Text.literal("New Profile"),
-				b -> client.setScreen(
+		addRenderableWidget(Button
+			.builder(Component.literal("New Profile"),
+				b -> minecraft.setScreen(
 					new EnterProfileNameScreen(this, this::newProfile)))
-			.dimensions(width / 2 - 154, height - 48, 100, 20).build());
+			.bounds(width / 2 - 154, height - 48, 100, 20).build());
 		
-		loadButton = addDrawableChild(
-			ButtonWidget.builder(Text.literal("Load"), b -> loadSelected())
-				.dimensions(width / 2 - 50, height - 48, 100, 20).build());
+		loadButton = addRenderableWidget(
+			Button.builder(Component.literal("Load"), b -> loadSelected())
+				.bounds(width / 2 - 50, height - 48, 100, 20).build());
 		
-		addDrawableChild(
-			ButtonWidget.builder(Text.literal("Cancel"), b -> openPrevScreen())
-				.dimensions(width / 2 + 54, height - 48, 100, 20).build());
+		addRenderableWidget(Button
+			.builder(Component.literal("Cancel"),
+				b -> minecraft.setScreen(prevScreen))
+			.bounds(width / 2 + 54, height - 48, 100, 20).build());
 	}
 	
 	private void openFolder()
 	{
-		Util.getOperatingSystem().open(
+		Util.getPlatform().openFile(
 			WurstClient.INSTANCE.getKeybinds().getProfilesFolder().toFile());
 	}
 	
@@ -88,19 +93,18 @@ public final class KeybindProfilesScreen extends Screen
 	
 	private void loadSelected()
 	{
-		if(listGui.selected < 0 || listGui.selected >= listGui.list.size())
+		Path path = listGui.getSelectedPath();
+		if(path == null)
 		{
-			openPrevScreen();
+			minecraft.setScreen(prevScreen);
 			return;
 		}
 		
-		Path path = listGui.list.get(listGui.selected);
-		String fileName = "" + path.getFileName();
-		
 		try
 		{
+			String fileName = "" + path.getFileName();
 			WurstClient.INSTANCE.getKeybinds().loadProfile(fileName);
-			openPrevScreen();
+			minecraft.setScreen(prevScreen);
 			
 		}catch(IOException | JsonException e)
 		{
@@ -109,84 +113,39 @@ public final class KeybindProfilesScreen extends Screen
 		}
 	}
 	
-	private void openPrevScreen()
-	{
-		client.setScreen(prevScreen);
-	}
-	
 	@Override
-	public boolean mouseClicked(double mouseX, double mouseY, int mouseButton)
+	public boolean keyPressed(KeyEvent context)
 	{
-		boolean childClicked = super.mouseClicked(mouseX, mouseY, mouseButton);
-		
-		listGui.mouseClicked(mouseX, mouseY, mouseButton);
-		
-		if(!childClicked && (mouseX < (width - 220) / 2
-			|| mouseX > width / 2 + 129 || mouseY < 32 || mouseY > height - 64))
-			listGui.selected = -1;
-		
-		return childClicked;
-	}
-	
-	@Override
-	public boolean mouseDragged(double double_1, double double_2, int int_1,
-		double double_3, double double_4)
-	{
-		listGui.mouseDragged(double_1, double_2, int_1, double_3, double_4);
-		return super.mouseDragged(double_1, double_2, int_1, double_3,
-			double_4);
-	}
-	
-	@Override
-	public boolean mouseReleased(double double_1, double double_2, int int_1)
-	{
-		listGui.mouseReleased(double_1, double_2, int_1);
-		return super.mouseReleased(double_1, double_2, int_1);
-	}
-	
-	@Override
-	public boolean mouseScrolled(double mouseX, double mouseY,
-		double horizontalAmount, double verticalAmount)
-	{
-		listGui.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
-		return super.mouseScrolled(mouseX, mouseY, horizontalAmount,
-			verticalAmount);
-	}
-	
-	@Override
-	public boolean keyPressed(int keyCode, int scanCode, int int_3)
-	{
-		if(keyCode == GLFW.GLFW_KEY_ENTER)
+		if(context.key() == GLFW.GLFW_KEY_ENTER)
 			loadSelected();
-		else if(keyCode == GLFW.GLFW_KEY_ESCAPE)
-			openPrevScreen();
+		else if(context.key() == GLFW.GLFW_KEY_ESCAPE)
+			minecraft.setScreen(prevScreen);
 		
-		return super.keyPressed(keyCode, scanCode, int_3);
+		return super.keyPressed(context);
 	}
 	
 	@Override
 	public void tick()
 	{
-		loadButton.active =
-			listGui.selected >= 0 && listGui.selected < listGui.list.size();
+		loadButton.active = listGui.getSelected() != null;
 	}
 	
 	@Override
-	public void render(DrawContext context, int mouseX, int mouseY,
+	public void render(GuiGraphics context, int mouseX, int mouseY,
 		float partialTicks)
 	{
-		renderBackground(context, mouseX, mouseY, partialTicks);
 		listGui.render(context, mouseX, mouseY, partialTicks);
 		
-		context.drawCenteredTextWithShadow(client.textRenderer,
-			"Keybind Profiles", width / 2, 12, 0xffffff);
+		context.drawCenteredString(minecraft.font, "Keybind Profiles",
+			width / 2, 12, CommonColors.WHITE);
 		
-		for(Drawable drawable : drawables)
+		for(Renderable drawable : renderables)
 			drawable.render(context, mouseX, mouseY, partialTicks);
 		
-		if(loadButton.isSelected() && !loadButton.active)
-			context.drawTooltip(textRenderer,
-				Arrays.asList(Text.literal("You must first select a file.")),
+		if(loadButton.isHoveredOrFocused() && !loadButton.active)
+			context.setComponentTooltipForNextFrame(font,
+				Arrays
+					.asList(Component.literal("You must first select a file.")),
 				mouseX, mouseY);
 	}
 	
@@ -196,65 +155,59 @@ public final class KeybindProfilesScreen extends Screen
 		return false;
 	}
 	
-	private static class ListGui extends ListWidget
+	private final class Entry
+		extends ObjectSelectionList.Entry<KeybindProfilesScreen.Entry>
 	{
-		private final MinecraftClient mc;
-		private final List<Path> list;
-		private int selected = -1;
+		private final Path path;
 		
-		public ListGui(MinecraftClient mc, KeybindProfilesScreen screen,
-			ArrayList<Path> list)
+		public Entry(Path path)
 		{
-			super(mc, screen.width, screen.height, 36, screen.height - 64, 20);
-			this.mc = mc;
-			this.list = list;
+			this.path = Objects.requireNonNull(path);
 		}
 		
 		@Override
-		protected int getItemCount()
+		public Component getNarration()
 		{
-			return list.size();
+			return Component.translatable("narrator.select",
+				"Profile " + path.getFileName());
 		}
 		
 		@Override
-		protected boolean selectItem(int index, int int_2, double var3,
-			double var4)
+		public void renderContent(GuiGraphics context, int mouseX, int mouseY,
+			boolean hovered, float tickDelta)
 		{
-			if(index >= 0 && index < list.size())
-				selected = index;
+			int x = getContentX();
+			int y = getContentY();
 			
-			return true;
-		}
-		
-		@Override
-		protected boolean isSelectedItem(int index)
-		{
-			return index == selected;
-		}
-		
-		@Override
-		protected void renderBackground()
-		{
+			Font tr = minecraft.font;
 			
+			String fileName = "" + path.getFileName();
+			context.drawString(tr, fileName, x + 28, y,
+				WurstColors.VERY_LIGHT_GRAY);
+			
+			String relPath =
+				"" + minecraft.gameDirectory.toPath().relativize(path);
+			context.drawString(tr, relPath, x + 28, y + 9,
+				CommonColors.LIGHT_GRAY);
+		}
+	}
+	
+	private final class ListGui
+		extends ObjectSelectionList<KeybindProfilesScreen.Entry>
+	{
+		public ListGui(Minecraft mc, KeybindProfilesScreen screen,
+			List<Path> list)
+		{
+			super(mc, screen.width, screen.height - 96, 36, 20);
+			
+			list.stream().map(KeybindProfilesScreen.Entry::new)
+				.forEach(this::addEntry);
 		}
 		
-		@Override
-		protected void renderItem(DrawContext context, int index, int x, int y,
-			int var4, int var5, int var6, float partialTicks)
+		public Path getSelectedPath()
 		{
-			TextRenderer tr = mc.textRenderer;
-			
-			Path path = list.get(index);
-			// tr.draw(matrixStack, "" + path.getFileName(), x + 28, y,
-			// 0xf0f0f0);
-			context.drawTextWithShadow(tr, "" + path.getFileName(), x + 28, y,
-				0xf0f0f0);
-			// tr.draw(matrixStack, "" +
-			// client.runDirectory.toPath().relativize(path), x + 28, y + 9,
-			// 0xa0a0a0);
-			context.drawTextWithShadow(tr,
-				"" + client.runDirectory.toPath().relativize(path), x + 28,
-				y + 9, 0xa0a0a0);
+			KeybindProfilesScreen.Entry selected = getSelected();
+			return selected != null ? selected.path : null;
 		}
 	}
 }

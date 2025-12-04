@@ -12,25 +12,19 @@ import java.util.Random;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.lwjgl.opengl.GL11;
+import com.mojang.blaze3d.vertex.PoseStack;
 
-import com.mojang.blaze3d.systems.RenderSystem;
-
-import net.minecraft.client.gl.ShaderProgramKeys;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.client.network.ClientPlayerInteractionManager;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.passive.AbstractHorseEntity;
-import net.minecraft.entity.passive.AnimalEntity;
-import net.minecraft.entity.passive.TameableEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.ActionResult;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.EntityHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.client.multiplayer.MultiPlayerGameMode;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.TamableAnimal;
+import net.minecraft.world.entity.animal.Animal;
+import net.minecraft.world.entity.animal.horse.AbstractHorse;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.EntityHitResult;
+import net.minecraft.world.phys.Vec3;
 import net.wurstclient.Category;
 import net.wurstclient.SearchTags;
 import net.wurstclient.events.HandleInputListener;
@@ -42,7 +36,6 @@ import net.wurstclient.settings.SliderSetting;
 import net.wurstclient.settings.SliderSetting.ValueDisplay;
 import net.wurstclient.settings.filters.FilterBabiesSetting;
 import net.wurstclient.util.EntityUtils;
-import net.wurstclient.util.RegionPos;
 import net.wurstclient.util.RenderUtils;
 import net.wurstclient.util.RotationUtils;
 
@@ -72,8 +65,8 @@ public final class FeedAuraHack extends Hack
 		false);
 	
 	private final Random random = new Random();
-	private AnimalEntity target;
-	private AnimalEntity renderTarget;
+	private Animal target;
+	private Animal renderTarget;
 	
 	public FeedAuraHack()
 	{
@@ -116,14 +109,13 @@ public final class FeedAuraHack extends Hack
 	@Override
 	public void onUpdate()
 	{
-		ClientPlayerEntity player = MC.player;
-		ItemStack heldStack = player.getInventory().getMainHandStack();
+		LocalPlayer player = MC.player;
+		ItemStack heldStack = player.getInventory().getSelectedItem();
 		
 		double rangeSq = range.getValueSq();
-		Stream<AnimalEntity> stream = EntityUtils.getValidAnimals()
-			.filter(e -> player.squaredDistanceTo(e) <= rangeSq)
-			.filter(e -> e.isBreedingItem(heldStack))
-			.filter(AnimalEntity::canEat);
+		Stream<Animal> stream = EntityUtils.getValidAnimals()
+			.filter(e -> player.distanceToSqr(e) <= rangeSq)
+			.filter(e -> e.isFood(heldStack)).filter(Animal::canFallInLove);
 		
 		if(filterBabies.isChecked())
 			stream = stream.filter(filterBabies);
@@ -132,10 +124,10 @@ public final class FeedAuraHack extends Hack
 			stream = stream.filter(e -> !isUntamed(e));
 		
 		if(filterHorses.isChecked())
-			stream = stream.filter(e -> !(e instanceof AbstractHorseEntity));
+			stream = stream.filter(e -> !(e instanceof AbstractHorse));
 		
 		// convert targets to list
-		ArrayList<AnimalEntity> targets =
+		ArrayList<Animal> targets =
 			stream.collect(Collectors.toCollection(ArrayList::new));
 		
 		// pick a target at random
@@ -156,92 +148,63 @@ public final class FeedAuraHack extends Hack
 		if(target == null)
 			return;
 		
-		ClientPlayerInteractionManager im = MC.interactionManager;
-		ClientPlayerEntity player = MC.player;
-		Hand hand = Hand.MAIN_HAND;
+		MultiPlayerGameMode im = MC.gameMode;
+		LocalPlayer player = MC.player;
+		InteractionHand hand = InteractionHand.MAIN_HAND;
 		
-		if(im.isBreakingBlock() || player.isRiding())
+		if(im.isDestroying() || player.isHandsBusy())
 			return;
 		
 		// create realistic hit result
-		Box box = target.getBoundingBox();
-		Vec3d start = RotationUtils.getEyesPos();
-		Vec3d end = box.getCenter();
-		Vec3d hitVec = box.raycast(start, end).orElse(start);
+		AABB box = target.getBoundingBox();
+		Vec3 start = RotationUtils.getEyesPos();
+		Vec3 end = box.getCenter();
+		Vec3 hitVec = box.clip(start, end).orElse(start);
 		EntityHitResult hitResult = new EntityHitResult(target, hitVec);
 		
-		ActionResult actionResult =
-			im.interactEntityAtLocation(player, target, hitResult, hand);
+		InteractionResult actionResult =
+			im.interactAt(player, target, hitResult, hand);
 		
-		if(!actionResult.isAccepted())
-			actionResult = im.interactEntity(player, target, hand);
+		if(!actionResult.consumesAction())
+			actionResult = im.interact(player, target, hand);
 		
-		if(actionResult instanceof ActionResult.Success success
-			&& success.swingSource() == ActionResult.SwingSource.CLIENT)
-			player.swingHand(hand);
+		if(actionResult instanceof InteractionResult.Success success
+			&& success.swingSource() == InteractionResult.SwingSource.CLIENT)
+			player.swing(hand);
 		
 		target = null;
 	}
 	
 	@Override
-	public void onRender(MatrixStack matrixStack, float partialTicks)
+	public void onRender(PoseStack matrixStack, float partialTicks)
 	{
 		if(renderTarget == null)
 			return;
 		
-		// GL settings
-		GL11.glEnable(GL11.GL_BLEND);
-		GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
-		GL11.glEnable(GL11.GL_CULL_FACE);
-		GL11.glDisable(GL11.GL_DEPTH_TEST);
-		
-		matrixStack.push();
-		
-		RegionPos region = RenderUtils.getCameraRegion();
-		RenderUtils.applyRegionalRenderOffset(matrixStack, region);
-		
-		Box box = new Box(BlockPos.ORIGIN);
 		float p = 1;
-		LivingEntity le = renderTarget;
-		p = (le.getMaxHealth() - le.getHealth()) / le.getMaxHealth();
+		if(renderTarget.getMaxHealth() > 1e-5)
+			p = renderTarget.getHealth() / renderTarget.getMaxHealth();
 		float green = p * 2F;
 		float red = 2 - green;
+		float[] rgb = {red, green, 0};
+		int quadColor = RenderUtils.toIntColor(rgb, 0.25F);
+		int lineColor = RenderUtils.toIntColor(rgb, 0.5F);
 		
-		Vec3d lerpedPos = EntityUtils.getLerpedPos(renderTarget, partialTicks)
-			.subtract(region.toVec3d());
-		matrixStack.translate(lerpedPos.x, lerpedPos.y, lerpedPos.z);
+		AABB box = EntityUtils.getLerpedBox(renderTarget, partialTicks);
+		if(p < 1)
+			box = box.deflate((1 - p) * 0.5 * box.getXsize(),
+				(1 - p) * 0.5 * box.getYsize(), (1 - p) * 0.5 * box.getZsize());
 		
-		matrixStack.translate(0, 0.05, 0);
-		matrixStack.scale(renderTarget.getWidth(), renderTarget.getHeight(),
-			renderTarget.getWidth());
-		matrixStack.translate(-0.5, 0, -0.5);
-		
-		matrixStack.translate(0.5, 0.5, 0.5);
-		matrixStack.scale(p, p, p);
-		matrixStack.translate(-0.5, -0.5, -0.5);
-		
-		RenderSystem.setShader(ShaderProgramKeys.POSITION);
-		
-		RenderSystem.setShaderColor(red, green, 0, 0.25F);
-		RenderUtils.drawSolidBox(box, matrixStack);
-		
-		RenderSystem.setShaderColor(red, green, 0, 0.5F);
-		RenderUtils.drawOutlinedBox(box, matrixStack);
-		
-		matrixStack.pop();
-		
-		// GL resets
-		RenderSystem.setShaderColor(1, 1, 1, 1);
-		GL11.glEnable(GL11.GL_DEPTH_TEST);
-		GL11.glDisable(GL11.GL_BLEND);
+		RenderUtils.drawSolidBox(matrixStack, box, quadColor, false);
+		RenderUtils.drawOutlinedBox(matrixStack, box, lineColor, false);
 	}
 	
-	private boolean isUntamed(AnimalEntity e)
+	private boolean isUntamed(Animal e)
 	{
-		if(e instanceof AbstractHorseEntity horse && !horse.isTame())
+		if(e instanceof AbstractHorse horse && !horse.isTamed())
 			return true;
 		
-		if(e instanceof TameableEntity tame && !tame.isTamed())
+		if(e instanceof TamableAnimal tame && !tame.isTame())
 			return true;
 		
 		return false;

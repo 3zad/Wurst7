@@ -10,15 +10,16 @@ package net.wurstclient.hacks;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
-import net.minecraft.block.FluidBlock;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import net.wurstclient.Category;
 import net.wurstclient.events.AirStrafingSpeedListener;
 import net.wurstclient.events.UpdateListener;
 import net.wurstclient.hack.Hack;
+import net.wurstclient.settings.CheckboxSetting;
 import net.wurstclient.settings.SliderSetting;
 import net.wurstclient.settings.SliderSetting.ValueDisplay;
 import net.wurstclient.util.BlockUtils;
@@ -37,14 +38,30 @@ public final class GlideHack extends Hack
 		"Won't glide when you are too close to the ground.", 0, 0, 2, 0.01,
 		ValueDisplay.DECIMAL.withLabel(0, "disabled"));
 	
+	private final CheckboxSetting pauseOnSneak =
+		new CheckboxSetting("Pause when sneaking", true);
+	
 	public GlideHack()
 	{
 		super("Glide");
-		
 		setCategory(Category.MOVEMENT);
 		addSetting(fallSpeed);
 		addSetting(moveSpeed);
 		addSetting(minHeight);
+		addSetting(pauseOnSneak);
+	}
+	
+	@Override
+	public String getRenderName()
+	{
+		LocalPlayer player = MC.player;
+		if(player == null)
+			return getName();
+		
+		if(pauseOnSneak.isChecked() && player.isShiftKeyDown())
+			return getName() + " (paused)";
+		
+		return getName();
 	}
 	
 	@Override
@@ -64,32 +81,36 @@ public final class GlideHack extends Hack
 	@Override
 	public void onUpdate()
 	{
-		ClientPlayerEntity player = MC.player;
-		Vec3d v = player.getVelocity();
+		LocalPlayer player = MC.player;
 		
-		if(player.isOnGround() || player.isTouchingWater() || player.isInLava()
-			|| player.isClimbing() || v.y >= 0)
+		if(pauseOnSneak.isChecked() && player.isShiftKeyDown())
+			return;
+		
+		Vec3 v = player.getDeltaMovement();
+		
+		if(player.onGround() || player.isInWater() || player.isInLava()
+			|| player.onClimbable() || v.y >= 0)
 			return;
 		
 		if(minHeight.getValue() > 0)
 		{
-			Box box = player.getBoundingBox();
-			box = box.union(box.offset(0, -minHeight.getValue(), 0));
-			if(!MC.world.isSpaceEmpty(box))
+			AABB box = player.getBoundingBox();
+			box = box.minmax(box.move(0, -minHeight.getValue(), 0));
+			if(!MC.level.noCollision(box))
 				return;
 			
-			BlockPos min = BlockPos.ofFloored(box.minX, box.minY, box.minZ);
-			BlockPos max = BlockPos.ofFloored(box.maxX, box.maxY, box.maxZ);
+			BlockPos min = BlockPos.containing(box.minX, box.minY, box.minZ);
+			BlockPos max = BlockPos.containing(box.maxX, box.maxY, box.maxZ);
 			Stream<BlockPos> stream = StreamSupport
 				.stream(BlockUtils.getAllInBox(min, max).spliterator(), true);
 			
 			// manual collision check, since liquids don't have bounding boxes
 			if(stream.map(BlockUtils::getBlock)
-				.anyMatch(FluidBlock.class::isInstance))
+				.anyMatch(LiquidBlock.class::isInstance))
 				return;
 		}
 		
-		player.setVelocity(v.x, Math.max(v.y, -fallSpeed.getValue()), v.z);
+		player.setDeltaMovement(v.x, Math.max(v.y, -fallSpeed.getValue()), v.z);
 	}
 	
 	@Override
