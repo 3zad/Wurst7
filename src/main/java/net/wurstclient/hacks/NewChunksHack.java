@@ -8,12 +8,18 @@
 package net.wurstclient.hacks;
 
 import java.awt.Color;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.sql.Connection;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -33,6 +39,7 @@ import net.wurstclient.settings.CheckboxSetting;
 import net.wurstclient.settings.ColorSetting;
 import net.wurstclient.settings.SliderSetting;
 import net.wurstclient.settings.SliderSetting.ValueDisplay;
+import net.wurstclient.settings.TextFieldSetting;
 import net.wurstclient.util.BlockUtils;
 import net.wurstclient.util.RegionPos;
 import net.wurstclient.util.RenderUtils;
@@ -41,6 +48,18 @@ import net.wurstclient.util.chunk.ChunkUtils;
 public final class NewChunksHack extends Hack
 	implements UpdateListener, RenderListener
 {
+	static
+	{
+		try
+		{
+			Class.forName("org.sqlite.JDBC");
+		}catch(ClassNotFoundException e)
+		{
+			System.err.println("SQLite JDBC driver not found!");
+			e.printStackTrace();
+		}
+	}
+	
 	private final NewChunksStyleSetting style = new NewChunksStyleSetting();
 	
 	private final NewChunksShowSetting show = new NewChunksShowSetting();
@@ -70,7 +89,12 @@ public final class NewChunksHack extends Hack
 		new ColorSetting("Old chunks color", Color.BLUE);
 	
 	private final CheckboxSetting logChunks = new CheckboxSetting("Log chunks",
-		"Writes to the log file when a new/old chunk is found.", false);
+		"Writes to a specified database when a chunk is found (link sqlite file below).",
+		false);
+	
+	public final TextFieldSetting sqliteDatabasePath =
+		new TextFieldSetting("Path to SQLite database",
+			"Path to the SQLite database file.", "db.sqlite3");
 	
 	private final Set<ChunkPos> newChunks = ConcurrentHashMap.newKeySet();
 	private final Set<ChunkPos> oldChunks = ConcurrentHashMap.newKeySet();
@@ -87,6 +111,11 @@ public final class NewChunksHack extends Hack
 	private RegionPos lastRegion;
 	private DimensionType lastDimension;
 	
+	private String serverIp;
+	private int serverPort;
+	
+	private String pathString;
+	
 	public NewChunksHack()
 	{
 		super("NewChunks");
@@ -101,6 +130,22 @@ public final class NewChunksHack extends Hack
 		addSetting(newChunksColor);
 		addSetting(oldChunksColor);
 		addSetting(logChunks);
+		addSetting(sqliteDatabasePath);
+		
+		ServerData networkHandler = Minecraft.getInstance().getCurrentServer();
+		
+		if(networkHandler != null)
+		{
+			String address = networkHandler.ip;
+			String[] parts = address.split(":");
+			this.serverIp = parts[0];
+			this.serverPort =
+				(parts.length > 1) ? Integer.parseInt(parts[1]) : 25565;
+		}else
+		{
+			this.serverIp = "singleplayer";
+			this.serverPort = 25565;
+		}
 	}
 	
 	@Override
@@ -108,6 +153,13 @@ public final class NewChunksHack extends Hack
 	{
 		EVENTS.add(UpdateListener.class, this);
 		EVENTS.add(RenderListener.class, this);
+		
+		pathString = sqliteDatabasePath.getValue();
+		
+		// Sanatize path string for SQLite JDBC
+		pathString = pathString.replace("\\\\", "\\");
+		pathString = pathString.replace("\\", "/");
+		
 		reset();
 	}
 	
@@ -213,7 +265,10 @@ public final class NewChunksHack extends Hack
 					oldChunks.add(chunkPos);
 					oldChunkReasons.add(pos);
 					if(logChunks.isChecked())
+					{
+						insertChunk(chunkPos.x, chunkPos.z, false);
 						System.out.println("old chunk at " + chunkPos);
+					}
 					return;
 				}
 				
@@ -221,6 +276,26 @@ public final class NewChunksHack extends Hack
 		// never runs again on that chunk, as that would be a huge waste of CPU
 		// time.
 		dontCheckAgain.add(chunkPos);
+	}
+
+	public void insertChunk(int x, int z, boolean isNew) {
+		try(Connection conn = DriverManager
+			.getConnection("jdbc:sqlite:" + pathString))
+		{
+			String sql =
+				"INSERT INTO newchunks (server_ip, port, x, z, is_new) VALUES (?, ?, ?, ?, ?)";
+			PreparedStatement pstmt =
+				conn.prepareStatement(sql);
+			pstmt.setString(1, this.serverIp);
+			pstmt.setInt(2, this.serverPort);
+			pstmt.setInt(3, x);
+			pstmt.setInt(4, z);
+			pstmt.setBoolean(5, isNew);
+			pstmt.executeUpdate();
+		}catch(SQLException e)
+		{
+			e.printStackTrace();
+		}
 	}
 	
 	public void afterUpdateBlock(BlockPos pos)
@@ -239,8 +314,10 @@ public final class NewChunksHack extends Hack
 		
 		newChunks.add(chunkPos);
 		newChunkReasons.add(pos);
-		if(logChunks.isChecked())
+		if(logChunks.isChecked()) {
+			insertChunk(chunkPos.x, chunkPos.z, true);
 			System.out.println("new chunk at " + chunkPos);
+		}
 	}
 	
 	@Override

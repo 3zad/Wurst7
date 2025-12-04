@@ -56,6 +56,10 @@ dependencies {
 	modImplementation "com.google.code.findbugs:jsr305:3.0.2"
 }
 
+dependencies {
+	implementation 'org.xerial:sqlite-jdbc:3.46.0.0'
+}
+
 fabricApi.configureTests {
 	createSourceSet = true
 	enableGameTests = false
