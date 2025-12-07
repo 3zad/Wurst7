@@ -277,20 +277,39 @@ public final class NewChunksHack extends Hack
 		// time.
 		dontCheckAgain.add(chunkPos);
 	}
-
-	public void insertChunk(int x, int z, boolean isNew) {
-		try(Connection conn = DriverManager
-			.getConnection("jdbc:sqlite:" + pathString))
+	
+	public void insertChunk(int x, int z, boolean isNew)
+	{
+		try(Connection conn =
+			DriverManager.getConnection("jdbc:sqlite:" + pathString))
 		{
 			String sql =
 				"INSERT INTO newchunks (server_ip, port, x, z, is_new) VALUES (?, ?, ?, ?, ?)";
-			PreparedStatement pstmt =
-				conn.prepareStatement(sql);
+			PreparedStatement pstmt = conn.prepareStatement(sql);
 			pstmt.setString(1, this.serverIp);
 			pstmt.setInt(2, this.serverPort);
 			pstmt.setInt(3, x);
 			pstmt.setInt(4, z);
 			pstmt.setBoolean(5, isNew);
+			pstmt.executeUpdate();
+			
+			// the next line will get the player's current position
+			BlockPos playerPos = Minecraft.getInstance().player.blockPosition();
+			int playerChunkX = playerPos.getX() / 16;
+			int playerChunkZ = playerPos.getZ() / 16;
+			
+			sql = "INSERT INTO playerpos (playername, x, z)\r\n" + //
+				"VALUES (?, ?, ?)\r\n" + //
+				"ON CONFLICT(playername)\r\n" + //
+				"DO UPDATE SET\r\n" + //
+				"    x = excluded.x,\r\n" + //
+				"    z = excluded.z;";
+			
+			pstmt = conn.prepareStatement(sql);
+			pstmt.setString(1,
+				Minecraft.getInstance().player.getName().getString());
+			pstmt.setInt(2, playerChunkX);
+			pstmt.setInt(3, playerChunkZ);
 			pstmt.executeUpdate();
 		}catch(SQLException e)
 		{
@@ -314,7 +333,8 @@ public final class NewChunksHack extends Hack
 		
 		newChunks.add(chunkPos);
 		newChunkReasons.add(pos);
-		if(logChunks.isChecked()) {
+		if(logChunks.isChecked())
+		{
 			insertChunk(chunkPos.x, chunkPos.z, true);
 			System.out.println("new chunk at " + chunkPos);
 		}
