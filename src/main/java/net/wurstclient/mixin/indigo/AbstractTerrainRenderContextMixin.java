@@ -35,7 +35,8 @@ public abstract class AbstractTerrainRenderContextMixin
 	 * coloring and shading is done, if Indigo is running.
 	 */
 	@Inject(at = @At("RETURN"),
-		method = "shadeQuad(Lnet/fabricmc/fabric/impl/client/indigo/renderer/mesh/MutableQuadViewImpl;ZZZ)V")
+		method = "shadeQuad(Lnet/fabricmc/fabric/impl/client/indigo/renderer/mesh/MutableQuadViewImpl;ZZZ)V",
+		require = 0)
 	private void onShadeQuad(MutableQuadViewImpl quad, boolean ao,
 		boolean emissive, boolean vanillaShade, CallbackInfo ci)
 	{
