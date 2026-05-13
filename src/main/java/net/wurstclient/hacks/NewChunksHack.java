@@ -266,7 +266,7 @@ public final class NewChunksHack extends Hack
 					oldChunkReasons.add(pos);
 					if(logChunks.isChecked())
 					{
-						insertChunk(chunkPos.x, chunkPos.z, false);
+						insertChunk(chunkPos.x(), chunkPos.z(), false);
 						System.out.println("old chunk at " + chunkPos);
 					}
 					return;
@@ -335,7 +335,7 @@ public final class NewChunksHack extends Hack
 		newChunkReasons.add(pos);
 		if(logChunks.isChecked())
 		{
-			insertChunk(chunkPos.x, chunkPos.z, true);
+			insertChunk(chunkPos.x(), chunkPos.z(), true);
 			System.out.println("new chunk at " + chunkPos);
 		}
 	}
